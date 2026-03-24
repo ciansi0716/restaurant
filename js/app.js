@@ -1,6 +1,5 @@
 // ==========================================
 // 🌟 Google Apps Script (試算表 API) 網址
-// 🚨 請換成你部署後獲得的那串網址
 // ==========================================
 const GAS_URL = "https://script.google.com/macros/s/AKfycbzY78FVNqEzvUk83Z82Rvbjhyc1qQhfb2k9wSZtdk8E4ZNhKIujxh0v1-6WYwpSJtYWyA/exec";
 
@@ -12,6 +11,7 @@ const App = {
   searchResults: [],
   visibleResults: [],
   lastSearchLocation: null, 
+  lastKeyword: "", 
   
   userLocation: null,
   userMarker: null,
@@ -21,6 +21,7 @@ const App = {
   brandDatabase: {},
   brandMappings: {},
   activeListFilters: new Set(),
+  expandedLists: new Set(), 
   
   currentDetailPlace: null,
 
@@ -172,9 +173,10 @@ const App = {
     return R * c;
   },
 
-  isInAnyList(placeId) {
+  isInAnyList(place) {
+    const bName = this.getBrandName(place.name);
     for (const listName in this.userLists) {
-      if (this.userLists[listName].some(p => p.place_id === placeId)) return true;
+      if (this.userLists[listName].some(p => this.getBrandName(p.name) === bName)) return true;
     }
     return false;
   },
@@ -192,7 +194,6 @@ const App = {
     this.performSearch();
   },
 
-  // 🌟 開關底部面板的專屬功能
   toggleBottomSheet() {
     const sheet = document.getElementById('list-container');
     if (sheet) {
@@ -200,29 +201,67 @@ const App = {
     }
   },
 
-  performSearch(specificLocation = null) {
-    const keyword = document.getElementById('search-input').value || '餐廳|美食';
-    const loc = specificLocation || this.mapCenter;
-    this.lastSearchLocation = loc; 
-    
-    this.placesService.nearbySearch({ location: loc, radius: '50000', keyword: keyword }, (results, status) => {
-      if (status === google.maps.places.PlacesServiceStatus.OK && results) {
-        this.searchResults = results;
-        document.getElementById('search-here-btn').style.display = 'none';
-        this.rebuildMarkers();
-        this.updateVisibleRestaurants();
-        
-        // 🌟 搜尋完成後，自動展開底部面板讓你選餐廳
-        const sheet = document.getElementById('list-container');
-        if (sheet) {
-          sheet.classList.remove('collapsed');
-        }
-      }
-    });
+  // 🌟 一般搜尋 (500公尺，模糊比對)
+  searchInCurrentArea() {
+    this.performSearch(this.map.getCenter(), '500', false);
   },
 
-  searchInCurrentArea() {
-    this.performSearch(this.map.getCenter());
+  // 🌟 進階搜尋 (50000公尺，嚴格名稱比對)
+  advancedSearch() {
+    const rawKeyword = document.getElementById('search-input').value.trim();
+    if (!rawKeyword) {
+      alert("⚠️ 進階搜尋需要請您先輸入「餐廳名稱」喔！");
+      return;
+    }
+    // 傳入 true 開啟嚴格模式
+    this.performSearch(this.map.getCenter(), '50000', true);
+  },
+
+  // 🌟 核心修改：整合半徑與嚴格過濾開關
+  performSearch(specificLocation = null, radius = '500', isAdvanced = false) {
+    const rawKeyword = document.getElementById('search-input').value.trim();
+    // 如果是一般搜尋且沒打字，給予預設值找附近美食
+    const searchKeyword = rawKeyword || (isAdvanced ? rawKeyword : '餐廳|美食|小吃|晚餐|飲食');
+    const loc = specificLocation || this.mapCenter;
+    
+    this.lastSearchLocation = loc; 
+    this.lastKeyword = rawKeyword.toLowerCase(); 
+    
+    this.placesService.nearbySearch({ location: loc, radius: radius, keyword: searchKeyword }, (results, status) => {
+      let finalResults = [];
+      
+      if (status === google.maps.places.PlacesServiceStatus.OK && results) {
+        if (isAdvanced && this.lastKeyword) {
+          // 🚀 進階搜尋：嚴格剃除，餐廳名稱「必須」包含你輸入的字！
+          finalResults = results.filter(p => p.name.toLowerCase().includes(this.lastKeyword));
+        } else {
+          finalResults = [...results];
+        }
+      }
+
+      // 保留清單強制召喚功能 (讓你清單裡的店絕對不漏接)
+      if (this.lastKeyword) {
+        const addedIds = new Set(finalResults.map(p => p.place_id));
+        for (const listName in this.userLists) {
+          this.userLists[listName].forEach(place => {
+            if (place.name.toLowerCase().includes(this.lastKeyword) && !addedIds.has(place.place_id)) {
+              finalResults.push(place);
+              addedIds.add(place.place_id);
+            }
+          });
+        }
+      }
+
+      this.searchResults = finalResults;
+      document.getElementById('search-here-btn').style.display = 'none';
+      this.rebuildMarkers();
+      this.updateVisibleRestaurants();
+      
+      const sheet = document.getElementById('list-container');
+      if (sheet) {
+        sheet.classList.remove('collapsed');
+      }
+    });
   },
 
   rebuildMarkers() {
@@ -269,22 +308,53 @@ const App = {
     this.searchResults.forEach(place => {
       if (addedPlaceIds.has(place.place_id)) return;
       
-      const marker = new google.maps.Marker({
-        map: this.map, 
-        position: place.geometry.location, 
-        title: place.name
-      });
-      marker.addListener('click', () => {
-        this.map.setCenter(place.geometry.location);
-        this.map.setZoom(17);
-        this.openDetail(place);
-      });
-      this.markers.push(marker);
+      const bName = this.getBrandName(place.name);
+      let activeEmoji = null;
+      let activeListName = null;
+      
+      for (let listName of this.activeListFilters) {
+        if (this.userLists[listName] && this.userLists[listName].some(p => this.getBrandName(p.name) === bName)) {
+          activeEmoji = this.listEmojis[listName] || '🔖';
+          activeListName = listName;
+          break;
+        }
+      }
+
+      if (activeEmoji) {
+        const marker = new google.maps.Marker({
+          map: this.map, 
+          position: place.geometry.location, 
+          title: `[${activeListName}] ${place.name}`,
+          icon: { path: google.maps.SymbolPath.CIRCLE, scale: 14, fillColor: '#FFFFFF', fillOpacity: 1, strokeWeight: 2, strokeColor: '#FF7A00' },
+          label: { text: activeEmoji, fontSize: '16px' }, 
+          zIndex: 1000 
+        });
+        marker.addListener('click', () => {
+          this.map.setCenter(place.geometry.location);
+          this.map.setZoom(17);
+          this.openDetail(place);
+        });
+        this.markers.push(marker);
+      } else {
+        const marker = new google.maps.Marker({
+          map: this.map, 
+          position: place.geometry.location, 
+          title: place.name
+        });
+        marker.addListener('click', () => {
+          this.map.setCenter(place.geometry.location);
+          this.map.setZoom(17);
+          this.openDetail(place);
+        });
+        this.markers.push(marker);
+      }
+      addedPlaceIds.add(place.place_id);
     });
   },
 
   updateVisibleRestaurants() {
     const onlyOpen = document.getElementById('open-now-toggle').checked;
+    const kw = this.lastKeyword;
     
     let filtered = this.searchResults.filter(p => {
       if (onlyOpen && (!p.opening_hours || !p.opening_hours.open_now)) return false;
@@ -292,13 +362,21 @@ const App = {
     });
     
     filtered.forEach(p => {
-      p._saved = this.isInAnyList(p.place_id);
+      p._saved = this.isInAnyList(p);
       p._distance = this.getDistance(this.lastSearchLocation, p.geometry.location);
+      p._nameMatch = kw ? p.name.toLowerCase().includes(kw) : false;
     });
 
     filtered.sort((a, b) => {
+      const aMatchSaved = a._nameMatch && a._saved;
+      const bMatchSaved = b._nameMatch && b._saved;
+      
+      if (aMatchSaved && !bMatchSaved) return -1;
+      if (!aMatchSaved && bMatchSaved) return 1;
+      
       if (a._saved && !b._saved) return -1; 
       if (!a._saved && b._saved) return 1;  
+      
       return a._distance - b._distance;     
     });
 
@@ -341,10 +419,13 @@ const App = {
     Object.keys(this.userLists).forEach(listName => {
       const isChecked = this.activeListFilters.has(listName) ? 'checked' : '';
       const emoji = this.listEmojis[listName] || '🔖';
+      
+      const uniqueBrands = new Set(this.userLists[listName].map(p => this.getBrandName(p.name)));
+      
       html += `
         <label style="display:block; margin:15px 0; font-size:16px; cursor:pointer;">
           <input type="checkbox" ${isChecked} onchange="App.toggleFilter('${listName}', this.checked)" style="transform: scale(1.2); margin-right:10px;"> 
-          ${emoji} ${listName} (${this.userLists[listName].length})
+          ${emoji} ${listName} (${uniqueBrands.size})
         </label>`;
     });
     html += `<div class="modal-actions"><button class="btn-primary" onclick="App.closeModal(); App.rebuildMarkers();">確定</button></div>`;
@@ -375,13 +456,39 @@ const App = {
     }
     
     document.getElementById('detail-title').innerText = place.name;
-    document.getElementById('detail-brand').innerText = `📂 品牌：${bName}`;
-    document.getElementById('detail-address').innerText = `📍 ${place.vicinity || '無地址'}`;
     
+    document.getElementById('detail-brand').innerHTML = `
+      📂 品牌：${bName}
+      <button onclick="App.showBrandRenameModal()" style="font-size:12px; padding:4px 8px; border-radius:12px; border:1px solid #FF7A00; background:white; color:#FF7A00; cursor:pointer;">✏️ 修改</button>
+    `;
+    
+    document.getElementById('detail-address').innerText = `📍 ${place.vicinity || '無地址'}`;
     document.getElementById('detail-rating').innerText = `⭐️ 評分: ${place.rating || 'N/A'}`;
     
     this.renderDetailData(bName);
+    this.updateDetailListBadges(); 
     this.navigate('detail');
+  },
+
+  updateDetailListBadges() {
+    if (!this.currentDetailPlace) return;
+    const bName = this.getBrandName(this.currentDetailPlace.name);
+    const container = document.getElementById('detail-lists-badges');
+    if (!container) return;
+
+    let badgesHtml = '';
+    for (const listName in this.userLists) {
+      const isInList = this.userLists[listName].some(p => this.getBrandName(p.name) === bName);
+      if (isInList) {
+        const emoji = this.listEmojis[listName] || '🔖';
+        badgesHtml += `<span style="background: #FFF0E5; color: #FF7A00; padding: 4px 10px; border-radius: 12px; font-size: 13px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px;">${emoji} ${listName}</span>`;
+      }
+    }
+
+    if (badgesHtml === '') {
+       badgesHtml = `<span style="color: gray; font-size: 13px;">尚未加入任何清單</span>`;
+    }
+    container.innerHTML = badgesHtml;
   },
 
   renderDetailData(bName) {
@@ -463,18 +570,18 @@ const App = {
 
   checkAndMoveToUncategorized(place) {
     if (!place) return;
+    const bName = this.getBrandName(place.name);
+    
     let isInAnyList = false;
     for (const listName in this.userLists) {
-      if (this.userLists[listName].some(p => p.place_id === place.place_id)) {
+      if (this.userLists[listName].some(p => this.getBrandName(p.name) === bName)) {
         isInAnyList = true;
         break;
       }
     }
     if (isInAnyList) return; 
 
-    const bName = this.getBrandName(place.name);
     const data = this.brandDatabase[bName];
-    
     if (data) {
       const hasMenu = data.menu && data.menu.length > 0;
       const hasVisits = data.visits && data.visits.length > 0;
@@ -485,7 +592,7 @@ const App = {
           this.userLists['未分類'] = [];
           this.listEmojis['未分類'] = '🔖';
         }
-        if (!this.userLists['未分類'].some(p => p.place_id === place.place_id)) {
+        if (!this.userLists['未分類'].some(p => this.getBrandName(p.name) === bName)) {
           this.userLists['未分類'].push(place);
         }
       }
@@ -495,11 +602,15 @@ const App = {
   ensureInList() {
     if (!this.currentDetailPlace) return;
     const place = this.currentDetailPlace;
+    const bName = this.getBrandName(place.name);
+    
     let isInAnyList = false;
     for (const listName in this.userLists) {
-      if (this.userLists[listName].some(p => p.place_id === place.place_id)) {
+      if (this.userLists[listName].some(p => this.getBrandName(p.name) === bName)) {
         isInAnyList = true;
-        break;
+        if (!this.userLists[listName].some(p => p.place_id === place.place_id)) {
+          this.userLists[listName].push(place);
+        }
       }
     }
     if (!isInAnyList) {
@@ -513,7 +624,53 @@ const App = {
 
   openInGoogleMaps() {
     if (!this.currentDetailPlace) return;
-    const place = this.currentDetailPlace;
+    const bName = this.getBrandName(this.currentDetailPlace.name);
+    const branches = new Map(); 
+    
+    branches.set(this.currentDetailPlace.place_id, this.currentDetailPlace);
+
+    for (const listName in this.userLists) {
+        this.userLists[listName].forEach(p => {
+            if (this.getBrandName(p.name) === bName) {
+                branches.set(p.place_id, p);
+            }
+        });
+    }
+
+    const branchList = Array.from(branches.values());
+
+    if (branchList.length === 1) {
+        this.executeGoogleMapsOpen(branchList[0]);
+    } else {
+        let html = `<h3 style="margin-top:0">請選擇要導航的分店：</h3>`;
+        branchList.forEach(p => {
+            html += `
+            <button class="action-btn" style="width:100%; margin-bottom:10px; background:#F9FAFB; color:#333; border:1px solid #ddd; text-align:left; padding:10px 15px;" 
+                    onclick="App.executeGoogleMapsOpenById('${p.place_id}')">
+                📍 ${p.name}
+            </button>`;
+        });
+        html += `<div class="modal-actions"><button onclick="App.closeModal()" style="background:#eee; color:#333; border:none; padding:10px 18px; border-radius:20px; font-weight:bold; cursor:pointer; width:100%;">取消</button></div>`;
+        this.openModal(html);
+    }
+  },
+
+  executeGoogleMapsOpenById(placeId) {
+    let placeToOpen = null;
+    if (this.currentDetailPlace && this.currentDetailPlace.place_id === placeId) placeToOpen = this.currentDetailPlace;
+    if (!placeToOpen) {
+       for(const listName in this.userLists){
+          const p = this.userLists[listName].find(x => x.place_id === placeId);
+          if(p){ placeToOpen = p; break; }
+       }
+    }
+    if(placeToOpen) {
+        this.executeGoogleMapsOpen(placeToOpen);
+        this.closeModal();
+    }
+  },
+
+  executeGoogleMapsOpen(place) {
     let url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name)}`;
     if (place.place_id) {
       url += `&query_place_id=${place.place_id}`;
@@ -533,18 +690,51 @@ const App = {
   },
 
   addMenuNote(category) {
-    const bName = this.getBrandName(this.currentDetailPlace.name);
-    const title = prompt(`新增「${category}」的餐點名稱：`);
-    if (!title) return; 
-    
-    const ratingInput = prompt("請給這道餐點評分 (1~5顆星)：", "5");
-    const rating = parseInt(ratingInput) || 5;
+    const html = `
+      <h3 style="margin-top:0">新增餐點評價</h3>
+      <div style="margin-bottom: 12px; text-align: left;">
+        <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">餐點名稱</label>
+        <input type="text" id="menu-form-title" placeholder="請輸入餐點名稱" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
+      </div>
+      <div style="display:flex; gap:10px; margin-bottom: 12px; text-align: left;">
+        <div style="flex:1;">
+          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">分類</label>
+          <select id="menu-form-category" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px; background:white;">
+            <option value="好吃" ${category === '好吃' ? 'selected' : ''}>😋 好吃</option>
+            <option value="普通" ${category === '普通' ? 'selected' : ''}>😐 普通</option>
+            <option value="難吃" ${category === '難吃' ? 'selected' : ''}>🤮 難吃</option>
+          </select>
+        </div>
+        <div style="flex:1;">
+          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評分 (1~5星)</label>
+          <input type="number" id="menu-form-rating" min="1" max="5" value="5" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
+        </div>
+      </div>
+      <div style="margin-bottom: 15px; text-align: left;">
+        <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評價心得</label>
+        <textarea id="menu-form-content" rows="3" placeholder="請輸入心得 (可留空)" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px; resize:vertical; font-family:inherit;"></textarea>
+      </div>
+      <div class="modal-actions" style="display:flex; gap:10px;">
+        <button onclick="App.closeModal()" style="flex:1; background:#eee; color:#333; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">取消</button>
+        <button onclick="App.submitMenuNote()" style="flex:1; background:var(--primary); color:white; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">儲存</button>
+      </div>
+    `;
+    this.openModal(html);
+  },
 
-    const content = prompt("請輸入評價心得 (可留空)：");
+  submitMenuNote() {
+    const title = document.getElementById('menu-form-title').value.trim();
+    if (!title) return alert("請輸入餐點名稱！");
+
+    const category = document.getElementById('menu-form-category').value;
+    const rating = parseInt(document.getElementById('menu-form-rating').value) || 5;
+    const content = document.getElementById('menu-form-content').value.trim();
+
+    const bName = this.getBrandName(this.currentDetailPlace.name);
     
     this.brandDatabase[bName].menu.push({
-      title: title.trim(),
-      content: content ? content.trim() : "",
+      title: title,
+      content: content,
       category: category,
       rating: rating
     });
@@ -552,6 +742,7 @@ const App = {
     this.ensureInList(); 
     this.saveData();
     this.renderDetailData(bName);
+    this.closeModal();
   },
 
   addOverallReview() {
@@ -588,24 +779,36 @@ const App = {
       }
     } 
     else if (type === 'menu') {
-      const newTitle = prompt("修改餐點名稱：", item.title);
-      if (!newTitle) return; 
-
-      const ratingInput = prompt("修改評分 (1~5顆星)：", item.rating || 5);
-      const newRating = parseInt(ratingInput) || item.rating || 5;
-
-      const newCategory = item.category;
-      const newContent = prompt("修改評價心得：", item.content || "");
-
-      this.brandDatabase[bName][type][index] = {
-        title: newTitle.trim(),
-        content: newContent ? newContent.trim() : "",
-        rating: newRating,
-        category: newCategory
-      };
-      
-      this.saveData();
-      this.renderDetailData(bName);
+      const html = `
+        <h3 style="margin-top:0">編輯餐點評價</h3>
+        <div style="margin-bottom: 12px; text-align: left;">
+          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">餐點名稱</label>
+          <input type="text" id="menu-form-title" value="${item.title || ''}" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
+        </div>
+        <div style="display:flex; gap:10px; margin-bottom: 12px; text-align: left;">
+          <div style="flex:1;">
+            <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">分類</label>
+            <select id="menu-form-category" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px; background:white;">
+              <option value="好吃" ${item.category === '好吃' ? 'selected' : ''}>😋 好吃</option>
+              <option value="普通" ${item.category === '普通' ? 'selected' : ''}>😐 普通</option>
+              <option value="難吃" ${item.category === '難吃' ? 'selected' : ''}>🤮 難吃</option>
+            </select>
+          </div>
+          <div style="flex:1;">
+            <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評分 (1~5星)</label>
+            <input type="number" id="menu-form-rating" min="1" max="5" value="${item.rating || 5}" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
+          </div>
+        </div>
+        <div style="margin-bottom: 15px; text-align: left;">
+          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評價心得</label>
+          <textarea id="menu-form-content" rows="3" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px; resize:vertical; font-family:inherit;">${item.content || ''}</textarea>
+        </div>
+        <div class="modal-actions" style="display:flex; gap:10px;">
+          <button onclick="App.closeModal()" style="flex:1; background:#eee; color:#333; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">取消</button>
+          <button onclick="App.submitMenuEdit(${index})" style="flex:1; background:var(--primary); color:white; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">儲存</button>
+        </div>
+      `;
+      this.openModal(html);
     } 
     else if (type === 'overall') {
       const oldTitle = item.title || "總評價";
@@ -624,6 +827,28 @@ const App = {
     }
   },
 
+  submitMenuEdit(index) {
+    const title = document.getElementById('menu-form-title').value.trim();
+    if (!title) return alert("請輸入餐點名稱！");
+
+    const category = document.getElementById('menu-form-category').value;
+    const rating = parseInt(document.getElementById('menu-form-rating').value) || 5;
+    const content = document.getElementById('menu-form-content').value.trim();
+
+    const bName = this.getBrandName(this.currentDetailPlace.name);
+
+    this.brandDatabase[bName].menu[index] = {
+      title: title,
+      content: content,
+      rating: rating,
+      category: category
+    };
+    
+    this.saveData();
+    this.renderDetailData(bName);
+    this.closeModal();
+  },
+
   deleteData(type, index) {
     const bName = this.getBrandName(this.currentDetailPlace.name);
     if(confirm("確定要刪除這筆資料嗎？")) {
@@ -634,9 +859,16 @@ const App = {
   },
 
   showAddToListModal() {
+    const bName = this.getBrandName(this.currentDetailPlace.name);
+    
+    const listContainer = document.getElementById('modal-list-container');
+    const currentScroll = listContainer ? listContainer.scrollTop : 0;
+    
     let html = `<h3 style="margin-top:0">加入清單</h3>`;
+    html += `<div id="modal-list-container" style="max-height: 50vh; overflow-y: auto; margin-bottom: 15px; padding-right: 5px;">`;
+    
     Object.keys(this.userLists).forEach(listName => {
-      const isAlreadyIn = this.userLists[listName].some(p => p.place_id === this.currentDetailPlace.place_id);
+      const isAlreadyIn = this.userLists[listName].some(p => this.getBrandName(p.name) === bName);
       const isChecked = isAlreadyIn ? 'checked' : '';
       const emoji = this.listEmojis[listName] || '🔖';
       
@@ -646,26 +878,78 @@ const App = {
           ${emoji} ${listName}
         </label>`;
     });
-    html += `<div class="modal-actions"><button class="btn-primary" onclick="App.closeModal()">完成</button></div>`;
+    
+    html += `</div>`;
+    html += `
+      <div class="modal-actions" style="display:flex; gap:10px;">
+        <button onclick="App.createNewListFromModal()" style="flex:1; background:#4CAF50; color:white; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">+ 新增清單</button>
+        <button class="btn-primary" onclick="App.closeModal()" style="flex:1;">完成</button>
+      </div>
+    `;
     this.openModal(html);
+    
+    const newListContainer = document.getElementById('modal-list-container');
+    if (newListContainer) {
+        newListContainer.scrollTop = currentScroll;
+    }
+  },
+  
+  createNewListFromModal() {
+    const name = prompt("請輸入新清單名稱:");
+    if (name && !this.userLists[name]) {
+      this.userLists[name] = [];
+      this.listEmojis[name] = '🔖';
+      this.expandedLists.add(name); 
+      this.saveData();
+      this.showAddToListModal();
+    } else if (this.userLists[name]) {
+      alert("清單名稱已存在！請換一個名稱。");
+    }
   },
 
   toggleRestaurantInList(listName, isAdding) {
+    const bName = this.getBrandName(this.currentDetailPlace.name);
+    
     if (isAdding) {
+      if (listName !== '未分類') {
+        if (this.userLists['未分類']) {
+          this.userLists['未分類'] = this.userLists['未分類'].filter(p => this.getBrandName(p.name) !== bName);
+        }
+      } else {
+        for (const ln in this.userLists) {
+          if (ln !== '未分類') {
+            this.userLists[ln] = this.userLists[ln].filter(p => this.getBrandName(p.name) !== bName);
+          }
+        }
+      }
+
       if (!this.userLists[listName].some(p => p.place_id === this.currentDetailPlace.place_id)) {
         this.userLists[listName].push(this.currentDetailPlace);
       }
+      for (const ln in this.userLists) {
+          this.userLists[ln].forEach(p => {
+              if (this.getBrandName(p.name) === bName) {
+                  if (!this.userLists[listName].some(existing => existing.place_id === p.place_id)) {
+                      this.userLists[listName].push(p);
+                  }
+              }
+          });
+      }
     } else {
-      this.userLists[listName] = this.userLists[listName].filter(p => p.place_id !== this.currentDetailPlace.place_id);
+      this.userLists[listName] = this.userLists[listName].filter(p => this.getBrandName(p.name) !== bName);
       this.checkAndMoveToUncategorized(this.currentDetailPlace);
     }
+    
     this.saveData();
     this.rebuildMarkers();
     this.updateVisibleRestaurants();
+    this.updateDetailListBadges(); 
     
     if (document.getElementById('view-lists').classList.contains('active')) {
       this.renderLists();
     }
+
+    this.showAddToListModal();
   },
 
   renameList(oldName) {
@@ -682,6 +966,11 @@ const App = {
       this.activeListFilters.delete(oldName);
       this.activeListFilters.add(newName);
     }
+    
+    if (this.expandedLists.has(oldName)) {
+        this.expandedLists.delete(oldName);
+        this.expandedLists.add(newName);
+    }
 
     delete this.userLists[oldName];
     delete this.listEmojis[oldName];
@@ -689,6 +978,7 @@ const App = {
     this.saveData();
     this.renderLists();
     this.rebuildMarkers(); 
+    this.updateDetailListBadges(); 
   },
 
   changeListEmoji(listName) {
@@ -704,6 +994,7 @@ const App = {
     this.saveData();
     this.renderLists(); 
     this.rebuildMarkers(); 
+    this.updateDetailListBadges(); 
   },
 
   renderLists() {
@@ -715,20 +1006,51 @@ const App = {
       return;
     }
     
+    const searchInput = document.getElementById('list-search-input');
+    const keyword = searchInput ? searchInput.value.trim().toLowerCase() : '';
+    
     Object.entries(this.userLists).forEach(([name, restaurants]) => {
+      const uniqueRestaurants = [];
+      const seenBrands = new Set();
+      restaurants.forEach(r => {
+        const bName = this.getBrandName(r.name);
+        if (!seenBrands.has(bName)) {
+          seenBrands.add(bName);
+          uniqueRestaurants.push(r);
+        }
+      });
+      
+      let filteredRestaurants = uniqueRestaurants;
+      let isListMatch = false; 
+      
+      if (keyword !== '') {
+          if (name.toLowerCase().includes(keyword)) {
+              isListMatch = true;
+          } else {
+              filteredRestaurants = uniqueRestaurants.filter(r => this.getBrandName(r.name).toLowerCase().includes(keyword));
+          }
+      }
+      
+      if (keyword !== '' && !isListMatch && filteredRestaurants.length === 0) {
+          return;
+      }
+      
       const section = document.createElement('div');
       section.className = 'section';
       section.style.margin = '15px';
+      
+      let isExpanded = this.expandedLists.has(name) || keyword !== '';
       
       const h3 = document.createElement('h3');
       h3.style.display = 'flex';
       h3.style.justifyContent = 'space-between';
       h3.style.alignItems = 'center';
       h3.style.margin = '0 0 10px 0';
+      h3.style.cursor = 'pointer'; 
       
       const emoji = this.listEmojis[name] || '🔖';
       const titleSpan = document.createElement('span');
-      titleSpan.innerHTML = `${emoji} ${name} (${restaurants.length})`;
+      titleSpan.innerHTML = `<span style="display:inline-block; width:15px; font-size:12px; color:#888;">${isExpanded ? '▼' : '▶'}</span> ${emoji} ${name} (${filteredRestaurants.length})`; 
       
       const actionDiv = document.createElement('div');
       actionDiv.style.display = 'flex';
@@ -739,20 +1061,20 @@ const App = {
         const editEmojiBtn = document.createElement('button');
         editEmojiBtn.innerText = '修圖';
         editEmojiBtn.style.cssText = 'background:none; color:#007AFF; border:none; cursor:pointer; font-weight:bold; font-size:14px; padding:0;';
-        editEmojiBtn.onclick = () => this.changeListEmoji(name); 
+        editEmojiBtn.onclick = (e) => { e.stopPropagation(); this.changeListEmoji(name); }; 
         actionDiv.appendChild(editEmojiBtn);
 
         const renameBtn = document.createElement('button');
         renameBtn.innerText = '編輯';
         renameBtn.style.cssText = 'background:none; color:#007AFF; border:none; cursor:pointer; font-weight:bold; font-size:14px; padding:0;';
-        renameBtn.onclick = () => this.renameList(name);
+        renameBtn.onclick = (e) => { e.stopPropagation(); this.renameList(name); };
         actionDiv.appendChild(renameBtn);
       }
 
       const deleteListBtn = document.createElement('button');
       deleteListBtn.innerText = '刪除';
       deleteListBtn.style.cssText = 'background:none; color:#FF4D4F; border:none; cursor:pointer; font-weight:bold; font-size:14px; padding:0;';
-      deleteListBtn.onclick = () => this.deleteList(name);
+      deleteListBtn.onclick = (e) => { e.stopPropagation(); this.deleteList(name); };
       
       actionDiv.appendChild(deleteListBtn);
       h3.appendChild(titleSpan);
@@ -761,9 +1083,25 @@ const App = {
 
       const ul = document.createElement('ul');
       ul.style.paddingLeft = '10px';
+      ul.style.display = isExpanded ? 'block' : 'none'; 
       
-      if (restaurants.length > 0) {
-        restaurants.forEach(r => {
+      h3.onclick = (e) => {
+          if(e.target.tagName.toLowerCase() === 'button') return;
+          
+          isExpanded = !isExpanded;
+          if (isExpanded) {
+              this.expandedLists.add(name);
+          } else {
+              this.expandedLists.delete(name);
+          }
+          
+          ul.style.display = isExpanded ? 'block' : 'none';
+          titleSpan.innerHTML = `<span style="display:inline-block; width:15px; font-size:12px; color:#888;">${isExpanded ? '▼' : '▶'}</span> ${emoji} ${name} (${filteredRestaurants.length})`;
+      };
+      
+      if (filteredRestaurants.length > 0) {
+        filteredRestaurants.forEach(r => {
+          const bName = this.getBrandName(r.name); 
           const li = document.createElement('li');
           li.style.listStyle = 'none';
           li.style.marginBottom = '12px';
@@ -774,7 +1112,13 @@ const App = {
           wrapper.style.alignItems = 'center';
 
           const nameSpan = document.createElement('span');
-          nameSpan.innerHTML = `📍 ${r.name}`;
+          let displayName = bName;
+          if (keyword !== '' && !isListMatch) {
+              const regex = new RegExp(`(${keyword})`, "gi");
+              displayName = bName.replace(regex, `<span style="background-color:#FFD54F;">$1</span>`);
+          }
+          
+          nameSpan.innerHTML = `📍 ${displayName}`; 
           nameSpan.style.cssText = 'color:var(--primary); font-weight:bold; font-size:16px; cursor:pointer; text-decoration:underline; flex:1;';
           nameSpan.onclick = () => {
             if (this.map && r.geometry && r.geometry.location) {
@@ -802,8 +1146,8 @@ const App = {
           removeBtn.style.cssText = 'color:red; background:none; border:none; font-size:13px; cursor:pointer; padding:5px;';
           removeBtn.onclick = (e) => {
             e.stopPropagation(); 
-            if(confirm(`確定要從「${name}」中移除 ${r.name} 嗎？`)) {
-              this.userLists[name] = this.userLists[name].filter(p => p.place_id !== r.place_id);
+            if(confirm(`確定要從「${name}」中移除品牌「${bName}」嗎？`)) {
+              this.userLists[name] = this.userLists[name].filter(p => this.getBrandName(p.name) !== bName);
               this.checkAndMoveToUncategorized(r);
               this.saveData();
               this.renderLists();
@@ -819,7 +1163,7 @@ const App = {
           ul.appendChild(li);
         });
       } else {
-        ul.innerHTML = '<li style="list-style:none; color:gray;">此清單尚無餐廳</li>';
+        ul.innerHTML = '<li style="list-style:none; color:gray;">此清單內沒有符合搜尋的餐廳</li>';
       }
       
       section.appendChild(ul);
@@ -832,6 +1176,7 @@ const App = {
     if (name && !this.userLists[name]) {
       this.userLists[name] = [];
       this.listEmojis[name] = '🔖';
+      this.expandedLists.add(name); 
       this.saveData();
       this.renderLists();
     }
@@ -844,6 +1189,7 @@ const App = {
       delete this.userLists[name];
       delete this.listEmojis[name];
       this.activeListFilters.delete(name);
+      this.expandedLists.delete(name); 
       
       placesToCheck.forEach(place => {
         this.checkAndMoveToUncategorized(place);
@@ -859,7 +1205,14 @@ const App = {
     const newBrand = prompt("修改這間餐廳的歸屬品牌：", oldBrand);
     
     if (newBrand && newBrand !== oldBrand) {
+      for (let placeName in this.brandMappings) {
+        if (this.brandMappings[placeName] === oldBrand) {
+          this.brandMappings[placeName] = newBrand;
+        }
+      }
+      
       this.brandMappings[this.currentDetailPlace.name] = newBrand;
+      this.brandMappings[oldBrand] = newBrand; 
       
       if (this.brandDatabase[oldBrand]) {
         if (!this.brandDatabase[newBrand]) {
@@ -874,8 +1227,9 @@ const App = {
         }
         delete this.brandDatabase[oldBrand];
       }
+      
       this.saveData();
-      this.openDetail(this.currentDetailPlace);
+      this.openDetail(this.currentDetailPlace); 
     }
   },
 
