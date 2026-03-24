@@ -1,0 +1,547 @@
+/* 定義全域色彩與變數 (現代化 App 配色) */
+:root {
+  --primary: #FF7A00;
+  --primary-light: #FFF0E5;
+  --bg-color: #F4F5F7;
+  --surface: #FFFFFF;
+  --text-main: #2D3142;
+  --text-muted: #9094A6;
+  --border: #EAEBEE;
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.12);
+  --radius-lg: 24px;
+  --radius-md: 12px;
+}
+
+* { 
+  box-sizing: border-box; 
+}
+
+body { 
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+  margin: 0; 
+  background-color: var(--bg-color); 
+  color: var(--text-main);
+  height: 100vh; 
+  overflow: hidden; 
+}
+
+/* =========================================
+   1. 頂部導覽列 (Header)
+========================================= */
+header { 
+  background: var(--surface); 
+  color: var(--text-main); 
+  padding: 14px 20px; 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+  box-shadow: var(--shadow-sm);
+  z-index: 20;
+  position: relative;
+}
+
+.user-info { 
+  cursor: pointer; 
+  font-weight: 700; 
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--primary);
+}
+
+.header-actions button { 
+  background: var(--bg-color); 
+  border: none; 
+  color: var(--text-main); 
+  cursor: pointer; 
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  margin-left: 10px; 
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  transition: all 0.2s ease;
+}
+
+.header-actions button:hover {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+/* =========================================
+   2. SPA 視圖與頁面結構
+========================================= */
+.view-container { 
+  display: none; 
+  height: calc(100vh - 64px); /* 扣除 header 高度 */
+  flex-direction: column; 
+  animation: fadeIn 0.3s ease-out;
+}
+.view-container.active { 
+  display: flex; 
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* =========================================
+   3. 搜尋列 (懸浮感設計)
+========================================= */
+/* =========================================
+   3. 搜尋列 (懸浮感設計 - 已修正擋住地圖按鈕問題)
+========================================= */
+/* =========================================
+   3. 搜尋列 (改為獨立區塊，不與地圖重疊)
+========================================= */
+.search-container { 
+  padding: 10px 20px 15px 20px; 
+  background: var(--surface); /* 與上方標題列使用相同背景色，視覺更整體 */
+  position: relative; /* 👈 拿掉 absolute，讓它回到正常排版 */
+  display: flex; 
+  gap: 10px; 
+  z-index: 10;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.05); /* 在底部加一點淡淡的陰影區隔地圖 */
+}
+
+.search-container input { 
+  flex: 1; 
+  padding: 14px 20px; 
+  border: none; 
+  border-radius: 30px; 
+  font-size: 15px; 
+  background: var(--bg-color); /* 讓輸入框有一點淺灰底色對比 */
+  outline: none;
+}
+
+.search-container button { 
+  padding: 0 20px; 
+  background: var(--primary); 
+  color: white; 
+  border: none; 
+  border-radius: 30px; 
+  cursor: pointer; 
+  box-shadow: var(--shadow-md);
+  transition: transform 0.1s;
+}
+
+.search-container button:active {
+  transform: scale(0.95);
+}
+
+/* =========================================
+   4. 主視覺區 (地圖與清單)
+========================================= */
+.main-content { 
+  display: flex; 
+  flex-direction: column; 
+  flex: 1; 
+  height: 100%; 
+  position: relative;
+}
+
+/* 上半部：地圖 */
+#map-container { 
+  flex: 1.2; 
+  position: relative; 
+}
+#map { 
+  width: 100%; 
+  height: 100%; 
+}
+
+/* 地圖上的按鈕 */
+.overlay-btn { 
+  position: absolute; 
+  background: var(--surface); 
+  border: none; 
+  padding: 10px 20px; 
+  border-radius: 20px; 
+  box-shadow: var(--shadow-md); 
+  cursor: pointer; 
+  z-index: 10; 
+  font-weight: 600; 
+  font-size: 14px;
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+#search-here-btn { 
+  top: 15px; /* 👈 因為上面沒有搜尋列擋住了，把按鈕往上拉到 15px */
+  left: 50%; 
+  transform: translateX(-50%); 
+}
+.filter-btn { 
+  top: 15px; /* 👈 往上拉到 15px */
+  right: 15px; 
+  padding: 10px; 
+  border-radius: 50%; 
+  color: var(--text-main);
+}
+/* =========================================
+   4. 主視覺區 (地圖與清單)
+========================================= */
+.main-content { 
+  display: flex; 
+  flex-direction: column; 
+  flex: 1; 
+  height: 100%; 
+  position: relative;
+}
+
+/* 上半部：地圖 */
+#map-container { 
+  flex: 1.2; 
+  position: relative; 
+}
+#map { 
+  width: 100%; 
+  height: 100%; 
+}
+
+/* 地圖上的按鈕 */
+.overlay-btn { 
+  position: absolute; 
+  background: var(--surface); 
+  border: none; 
+  padding: 10px 20px; 
+  border-radius: 20px; 
+  box-shadow: var(--shadow-md); 
+  cursor: pointer; 
+  z-index: 10; 
+  font-weight: 600; 
+  font-size: 14px;
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+#search-here-btn { 
+  top: 80px; /* 避開搜尋列 */
+  left: 50%; 
+  transform: translateX(-50%); 
+}
+.filter-btn { 
+  top: 80px; 
+  right: 20px; 
+  padding: 10px; 
+  border-radius: 50%; 
+  color: var(--text-main);
+}
+
+/* 下半部：抽屜式清單 (Bottom Sheet) */
+#list-container { 
+  flex: 1; 
+  background: var(--surface); 
+  display: flex; 
+  flex-direction: column; 
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  margin-top: -20px; /* 與地圖重疊製造層次感 */
+  z-index: 10;
+  box-shadow: 0 -4px 24px rgba(0,0,0,0.06);
+  padding-top: 5px;
+}
+
+/* 抽屜頂部的小把手 */
+#list-container::before {
+  content: '';
+  width: 40px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  margin: 8px auto 0;
+  display: block;
+}
+
+.list-header { 
+  padding: 15px 20px; 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center;
+  font-size: 14px; 
+  font-weight: bold; 
+  border-bottom: 1px solid var(--border);
+}
+
+.highlight-text { 
+  color: var(--primary); 
+}
+
+.scrollable-list { 
+  flex: 1; 
+  overflow-y: auto; 
+  padding: 10px 20px;
+}
+
+/* 餐廳卡片設計 */
+.restaurant-card { 
+  padding: 16px; 
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-bottom: 12px;
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center;
+  cursor: pointer; 
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s ease;
+}
+
+.restaurant-card:hover { 
+  border-color: var(--primary);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.restaurant-card strong {
+  font-size: 16px;
+  color: var(--text-main);
+  display: block;
+  margin-bottom: 4px;
+}
+
+.restaurant-card small {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+/* 定位專屬按鈕 (右下角) */
+.locate-btn { 
+  top: auto; 
+  bottom: 20px; 
+  right: 20px; 
+  padding: 12px; 
+  border-radius: 50%; 
+  width: 44px;
+  height: 44px;
+  justify-content: center;
+  box-shadow: var(--shadow-lg);
+  font-size: 18px;
+}
+
+/* =========================================
+   5. 詳細頁與次要頁面 (細節美化)
+========================================= */
+.page-header { 
+  background: var(--surface); 
+  color: var(--text-main); 
+  padding: 15px 20px; 
+  display: flex; 
+  align-items: center; 
+  gap: 15px; 
+  box-shadow: var(--shadow-sm);
+  z-index: 10;
+}
+
+.page-header h2 { 
+  flex: 1; 
+  margin: 0; 
+  font-size: 18px; 
+  font-weight: 700;
+}
+
+.page-header button { 
+  background: var(--bg-color); 
+  border: none; 
+  color: var(--text-main); 
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  cursor: pointer; 
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.scrollable-content { 
+  flex: 1; 
+  overflow-y: auto; 
+}
+
+.detail-padding { 
+  padding: 20px; 
+}
+
+/* 區塊卡片 (Info Card & Sections) */
+.info-card { 
+  background: linear-gradient(135deg, var(--primary-light) 0%, #FFF9F5 100%);
+  padding: 20px; 
+  border-radius: var(--radius-md); 
+  margin-bottom: 20px; 
+  border: 1px solid #FFE4D6;
+}
+
+.info-card h3 {
+  margin: 0 0 10px 0;
+  color: var(--primary);
+}
+
+.info-card p {
+  margin: 5px 0;
+  color: var(--text-main);
+  font-size: 14px;
+}
+
+.section { 
+  margin-bottom: 20px; 
+  background: var(--surface); 
+  padding: 20px; 
+  border-radius: var(--radius-md); 
+  box-shadow: var(--shadow-sm); 
+}
+
+.section h3 { 
+  margin-top: 0; 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center;
+  font-size: 16px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+}
+
+.section h3 button {
+  background: var(--primary-light);
+  color: var(--primary);
+  border: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+/* 共用操作按鈕 */
+.action-btn { 
+  width: 100%; 
+  padding: 14px; 
+  background: var(--surface); 
+  color: var(--primary); 
+  border: 2px solid var(--primary); 
+  border-radius: 30px; 
+  cursor: pointer; 
+  font-weight: bold; 
+  font-size: 15px;
+  margin-top: 15px; 
+  transition: all 0.2s;
+}
+
+.action-btn:hover {
+  background: var(--primary);
+  color: white;
+}
+
+.btn-primary { 
+  background: var(--primary); 
+  color: white; 
+}
+
+.btn-primary:hover {
+  background: #E66A00;
+}
+
+.btn-danger { 
+  background: #FF4D4F; 
+  color: white; 
+  border-color: #FF4D4F;
+}
+
+/* =========================================
+   6. 懸浮按鈕 (FAB) 與照片網格
+========================================= */
+.fab { 
+  position: absolute; 
+  bottom: 30px; 
+  right: 20px; 
+  background: var(--primary); 
+  color: white; 
+  padding: 14px 24px; 
+  border: none; 
+  border-radius: 30px; 
+  box-shadow: var(--shadow-lg); 
+  cursor: pointer; 
+  font-size: 15px; 
+  font-weight: bold;
+  display: flex; 
+  align-items: center; 
+  gap: 8px; 
+  transition: transform 0.2s;
+}
+
+.fab:hover {
+  transform: translateY(-3px);
+}
+
+.image-grid { 
+  display: grid; 
+  grid-template-columns: repeat(3, 1fr); 
+  gap: 10px; 
+  margin-top: 15px; 
+}
+
+.image-grid img { 
+  width: 100%; 
+  aspect-ratio: 1; 
+  object-fit: cover; 
+  border-radius: 8px; 
+}
+
+/* =========================================
+   7. 彈跳視窗 (Modal)
+========================================= */
+.modal-overlay { 
+  position: fixed; 
+  top: 0; 
+  left: 0; 
+  width: 100%; 
+  height: 100%; 
+  background: rgba(18, 20, 32, 0.6); 
+  backdrop-filter: blur(4px); /* 背景模糊效果 */
+  display: flex; 
+  justify-content: center; 
+  align-items: center; 
+  z-index: 1000; 
+}
+
+.modal-box { 
+  background: var(--surface); 
+  padding: 24px; 
+  border-radius: var(--radius-lg); 
+  width: 90%; 
+  max-width: 400px; 
+  max-height: 80vh; 
+  overflow-y: auto; 
+  box-shadow: var(--shadow-lg);
+  animation: modalPop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes modalPop {
+  0% { transform: scale(0.8); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.modal-box h3 {
+  margin-top: 0;
+  color: var(--text-main);
+}
+
+.modal-actions { 
+  margin-top: 24px; 
+  display: flex; 
+  justify-content: flex-end; 
+  gap: 12px; 
+}
+
+.modal-actions button { 
+  padding: 10px 18px; 
+  border: none; 
+  border-radius: 20px; 
+  cursor: pointer; 
+  font-weight: bold;
+}

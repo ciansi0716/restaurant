@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>My Food Map</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <header style="justify-content: space-between;">
+    <div style="font-size: 18px; font-weight: 800; color: var(--primary); display: flex; align-items: center; gap: 8px;">
+      🍽️ My Food Map
+    </div>
+    
+    <div class="header-actions" style="display: flex; gap: 8px;">
+      <button onclick="App.spinCompass()" style="width: auto; padding: 0 12px; border-radius: 20px; font-weight: bold; display: flex; align-items: center; gap: 5px;">
+        🧭 抽籤
+      </button>
+      <button onclick="App.navigate('lists')" style="width: auto; padding: 0 12px; border-radius: 20px; font-weight: bold; display: flex; align-items: center; gap: 5px;">
+        📁 清單
+      </button>
+    </div>
+  </header>
+
+  <div id="view-home" class="view-container active">
+    <div class="search-container">
+      <input type="text" id="search-input" placeholder="搜尋附近美食、餐廳..." onkeypress="if(event.key === 'Enter') App.searchInCurrentArea()">
+      <button onclick="App.searchInCurrentArea()">搜尋</button>
+    </div>
+
+    <div class="main-content" style="display: flex; flex-direction: column; height: 100%;">
+      
+      <div id="map-container" style="flex: 1; position: relative; min-height: 40vh;">
+        <div id="map" style="width: 100%; height: 100%; background-color: #e0e0e0;"></div>
+        
+        <button id="search-here-btn" class="overlay-btn" style="display:none;" onclick="App.searchInCurrentArea()">
+          🔄 搜尋這個區域
+        </button>
+        <button class="overlay-btn filter-btn" onclick="App.showFilterLayerModal()">
+          🗺️ 圖層
+        </button>
+        <button class="overlay-btn locate-btn" style="top: 135px; bottom: auto; right: 20px; width: 44px; height: 44px; padding: 0; justify-content: center;" onclick="App.centerToUserLocation()" title="回到我的位置">
+          🎯
+        </button>
+      </div>
+
+      <div id="list-container" style="height: 40vh; display: flex; flex-direction: column; background: var(--surface); z-index: 10; box-shadow: 0 -4px 10px rgba(0,0,0,0.1);">
+        <div class="list-header" style="flex-shrink: 0;">
+          <span id="result-count">搜尋中...</span>
+          <label style="display:flex; align-items:center; gap:5px; cursor:pointer; font-weight:normal;">
+            <input type="checkbox" id="open-now-toggle" onchange="App.updateVisibleRestaurants()"> 僅顯示營業中
+          </label>
+        </div>
+        
+        <div class="scrollable-list" id="search-results-list" style="flex: 1; overflow-y: auto; padding-bottom: 20px;">
+          </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="view-detail" class="view-container">
+    <div class="page-header">
+      <button onclick="App.navigate('home')">⬅️</button>
+      <h2 id="detail-title">餐廳名稱</h2>
+      <button onclick="App.showAddToListModal()" title="加入清單">🔖</button>
+    </div>
+
+    <div class="scrollable-content detail-padding">
+      <div class="info-card">
+        <h3 id="detail-brand" style="display:flex; justify-content:space-between; align-items:center;">
+          品牌名稱
+          <button onclick="App.showBrandRenameModal()" style="font-size:12px; padding:4px 8px; border-radius:12px; border:1px solid #FF7A00; background:white; color:#FF7A00; cursor:pointer;">✏️ 修改</button>
+        </h3>
+        <p id="detail-address">📍 地址</p>
+        <p id="detail-rating">⭐️ 評分</p>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <button class="action-btn btn-primary" onclick="App.addVisitDate()" style="margin-top:0;">📅 新增到訪日</button>
+      </div>
+
+      <div class="section">
+        <h3>歷史到訪紀錄</h3>
+        <div id="detail-visits"></div>
+      </div>
+
+      <div class="section">
+        <h3>餐點評價</h3>
+        <div id="detail-menu"></div>
+      </div>
+
+      <div class="section">
+        <h3>
+          總評價 / 筆記
+          <button onclick="App.addOverallReview()">+</button>
+        </h3>
+        <div id="detail-overall"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="view-lists" class="view-container">
+    <div class="page-header">
+      <button onclick="App.navigate('home')">⬅️</button>
+      <h2>我的美食清單</h2>
+    </div>
+    
+    <div class="scrollable-content" id="my-lists-container" style="padding-bottom: 80px;">
+      </div>
+
+    <button class="fab" onclick="App.showCreateListModal()">
+      ➕ 新增清單
+    </button>
+  </div>
+
+  <div class="modal-overlay" id="modal-overlay" style="display:none;">
+    <div class="modal-box" id="modal-content"></div>
+  </div>
+
+  <script src="js/app.js"></script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAcVWtQc4PP3T1Va16TtV5CA__B_T3tKJk&libraries=places&loading=async&callback=App.init" async defer></script>
+
+</body>
+</html>
