@@ -38,10 +38,10 @@
           🔄 搜尋這個區域
         </button>
         <button class="overlay-btn filter-btn" onclick="App.showFilterLayerModal()">
-          🗺️ 圖層
+          圖層
         </button>
         <button class="overlay-btn locate-btn" style="top: 135px; bottom: auto; right: 20px; width: 44px; height: 44px; padding: 0; justify-content: center;" onclick="App.centerToUserLocation()" title="回到我的位置">
-          🎯
+          📍
         </button>
       </div>
 
@@ -64,7 +64,10 @@
     <div class="page-header">
       <button onclick="App.navigate('home')">⬅️</button>
       <h2 id="detail-title">餐廳名稱</h2>
-      <button onclick="App.showAddToListModal()" title="加入清單">🔖</button>
+      
+      <button onclick="App.showAddToListModal()" title="加入清單" style="width: auto; padding: 4px 12px; border-radius: 20px; font-weight: bold; display: flex; align-items: center; gap: 5px; font-size: 14px; border: 1px solid var(--primary); color: var(--primary); background: white;">
+        加入清單
+      </button>
     </div>
 
     <div class="scrollable-content detail-padding">
@@ -73,7 +76,7 @@
           品牌名稱
           <button onclick="App.showBrandRenameModal()" style="font-size:12px; padding:4px 8px; border-radius:12px; border:1px solid #FF7A00; background:white; color:#FF7A00; cursor:pointer;">✏️ 修改</button>
         </h3>
-        <p id="detail-address">📍 地址</p>
+        <p id="detail-address">地址</p>
         <p id="detail-rating">⭐️ 評分</p>
       </div>
 

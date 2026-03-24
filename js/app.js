@@ -24,9 +24,6 @@ const App = {
   currentDetailPlace: null,
   compassCandidates: [], 
 
-  // ==========================================
-  // 1. 初始化系統
-  // ==========================================
   async init() {
     console.log("🚀 系統初始化中...");
     await this.loadData();
@@ -90,9 +87,6 @@ const App = {
     }
   },
 
-  // ==========================================
-  // 2. 資料存取 
-  // ==========================================
   async loadData() {
     try {
       const response = await fetch(GAS_URL);
@@ -140,9 +134,6 @@ const App = {
     }
   },
 
-  // ==========================================
-  // 3. 視覺化星星產生器
-  // ==========================================
   getStarString(rating) {
     if (!rating) return '';
     const rounded = Math.max(1, Math.min(5, Math.round(rating))); 
@@ -151,9 +142,6 @@ const App = {
     return `<span style="color:#FFB800; font-size:14px; letter-spacing:1px; margin-left:6px;">${full}${empty}</span>`;
   },
 
-  // ==========================================
-  // 4. 地圖與搜尋邏輯
-  // ==========================================
   initMap() {
     this.map = new google.maps.Map(document.getElementById("map"), {
       center: this.mapCenter,
@@ -272,9 +260,6 @@ const App = {
     }
   },
 
-  // ==========================================
-  // 5. 餐廳詳細頁邏輯
-  // ==========================================
   getBrandName(fullName) {
     if (this.brandMappings[fullName]) return this.brandMappings[fullName];
     return fullName.split(/[(（-]/)[0].trim();
@@ -303,7 +288,6 @@ const App = {
   renderDetailData(bName) {
     const data = this.brandDatabase[bName];
     
-    // 1. 到訪紀錄 
     const visitsHtml = data.visits.map((date, idx) => `
       <li style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:1px solid #eee; padding-bottom:6px;">
         <span style="font-size:15px;">${date}</span>
@@ -314,7 +298,6 @@ const App = {
       </li>`).join('');
     document.getElementById('detail-visits').innerHTML = visitsHtml ? `<ul style="padding-left:10px; margin:0; list-style:none;">${visitsHtml}</ul>` : '<p style="color:gray; font-size:14px; margin:0;">尚無紀錄</p>';
     
-    // 2. 餐點評價 
     const menuData = data.menu || [];
     const good = menuData.filter(m => m.category === '好吃');
     const normal = menuData.filter(m => m.category === '普通');
@@ -353,13 +336,12 @@ const App = {
       `;
     };
 
-    let menuHtml = renderMenuCategory(good, '好吃', '😋', '#4CAF50');
-    menuHtml += renderMenuCategory(normal, '普通', '😐', '#FF9800');
-    menuHtml += renderMenuCategory(bad, '難吃', '🤮', '#F44336');
+    let menuHtml = renderMenuCategory(good, '好吃', '', '#4CAF50');
+    menuHtml += renderMenuCategory(normal, '普通', '', '#FF9800');
+    menuHtml += renderMenuCategory(bad, '難吃', '', '#F44336');
 
     document.getElementById('detail-menu').innerHTML = menuHtml;
 
-    // 3. 總評價 
     const overallData = data.overall || [];
     const overallHtml = overallData.map((o, idx) => {
       const titleText = o.title || "總評價"; 
@@ -378,6 +360,43 @@ const App = {
     }).join('');
     
     document.getElementById('detail-overall').innerHTML = overallHtml || '<p style="color:gray; font-size:14px; margin-top:10px;">尚無總評價</p>';
+  },
+
+  // 🌟 新增的超級防護機制：如果餐廳被移出所有清單，但它身上「還有資料」，就強迫放回「未分類」！
+  checkAndMoveToUncategorized(place) {
+    if (!place) return;
+    
+    // 1. 檢查是否還在別的清單裡 (如果還在，就很安全不用管它)
+    let isInAnyList = false;
+    for (const listName in this.userLists) {
+      if (this.userLists[listName].some(p => p.place_id === place.place_id)) {
+        isInAnyList = true;
+        break;
+      }
+    }
+    if (isInAnyList) return; 
+
+    // 2. 如果被踢出所有清單了，就去查它身上有沒有資料
+    const bName = this.getBrandName(place.name);
+    const data = this.brandDatabase[bName];
+    
+    if (data) {
+      const hasMenu = data.menu && data.menu.length > 0;
+      const hasVisits = data.visits && data.visits.length > 0;
+      const hasOverall = data.overall && data.overall.length > 0;
+      
+      // 如果還有任何資料留存，就幫它建立「未分類」並裝進去！
+      if (hasMenu || hasVisits || hasOverall) {
+        if (!this.userLists['未分類']) {
+          this.userLists['未分類'] = [];
+          this.listEmojis['未分類'] = '🔖';
+        }
+        // 確認未分類裡面還沒有它，再放進去
+        if (!this.userLists['未分類'].some(p => p.place_id === place.place_id)) {
+          this.userLists['未分類'].push(place);
+        }
+      }
+    }
   },
 
   ensureInList() {
@@ -399,18 +418,13 @@ const App = {
     }
   },
 
-  // 🌟 開啟 Google 地圖專屬按鈕功能
   openInGoogleMaps() {
     if (!this.currentDetailPlace) return;
     const place = this.currentDetailPlace;
-    
-    // 利用餐廳名稱與 ID 來精準搜尋
     let url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name)}`;
     if (place.place_id) {
       url += `&query_place_id=${place.place_id}`;
     }
-    
-    // 另開新視窗跳轉至 Google Maps
     window.open(url, '_blank');
   },
 
@@ -427,7 +441,6 @@ const App = {
 
   addMenuNote(category) {
     const bName = this.getBrandName(this.currentDetailPlace.name);
-    
     const title = prompt(`新增「${category}」的餐點名稱：`);
     if (!title) return; 
     
@@ -450,7 +463,6 @@ const App = {
 
   addOverallReview() {
     const bName = this.getBrandName(this.currentDetailPlace.name);
-    
     const title = prompt("請輸入總評價標題 (例如：整體環境、服務態度)：");
     if (!title) return;
     
@@ -544,11 +556,17 @@ const App = {
     this.openModal(html);
   },
 
+  // 🌟 修改：當從 Modal 取消勾選時，觸發防護機制
   toggleRestaurantInList(listName, isAdding) {
     if (isAdding) {
-      this.userLists[listName].push(this.currentDetailPlace);
+      if (!this.userLists[listName].some(p => p.place_id === this.currentDetailPlace.place_id)) {
+        this.userLists[listName].push(this.currentDetailPlace);
+      }
     } else {
+      // 移除
       this.userLists[listName] = this.userLists[listName].filter(p => p.place_id !== this.currentDetailPlace.place_id);
+      // 呼叫防護網：如果身上還有資料，丟回未分類
+      this.checkAndMoveToUncategorized(this.currentDetailPlace);
     }
     this.saveData();
   },
@@ -604,10 +622,14 @@ const App = {
           const removeBtn = document.createElement('button');
           removeBtn.innerText = '移除';
           removeBtn.style.cssText = 'color:red; background:none; border:none; font-size:13px; cursor:pointer; padding:5px;';
+          
+          // 🌟 修改：當點擊列表的移除時，觸發防護機制
           removeBtn.onclick = (e) => {
             e.stopPropagation(); 
             if(confirm(`確定要從「${name}」中移除 ${r.name} 嗎？`)) {
               this.userLists[name] = this.userLists[name].filter(p => p.place_id !== r.place_id);
+              // 呼叫防護網：如果身上還有資料，丟回未分類
+              this.checkAndMoveToUncategorized(r);
               this.saveData();
               this.renderLists();
             }
@@ -637,11 +659,21 @@ const App = {
     }
   },
 
+  // 🌟 修改：當刪除整份清單時，清單內所有的餐廳都要經過防護機制檢查！
   deleteList(name) {
     if (confirm(`確定刪除「${name}」？此操作無法復原。`)) {
+      // 先把這個清單裡的餐廳名單「備份」起來
+      const placesToCheck = [...this.userLists[name]]; 
+      
       delete this.userLists[name];
       delete this.listEmojis[name];
       this.activeListFilters.delete(name);
+      
+      // 把剛剛備份的餐廳拿出來，一間一間經過防護網檢查，有資料的就會被接住放回「未分類」！
+      placesToCheck.forEach(place => {
+        this.checkAndMoveToUncategorized(place);
+      });
+
       this.saveData();
       this.renderLists();
     }
