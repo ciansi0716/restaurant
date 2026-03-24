@@ -141,11 +141,11 @@ const App = {
   },
 
   // ==========================================
-  // 3. 視覺化星星產生器 (專門給使用者的餐點評分使用)
+  // 3. 視覺化星星產生器
   // ==========================================
   getStarString(rating) {
     if (!rating) return '';
-    const rounded = Math.max(1, Math.min(5, Math.round(rating))); // 確保在 1~5 之間
+    const rounded = Math.max(1, Math.min(5, Math.round(rating))); 
     const full = '★'.repeat(rounded);
     const empty = '☆'.repeat(5 - rounded);
     return `<span style="color:#FFB800; font-size:14px; letter-spacing:1px; margin-left:6px;">${full}${empty}</span>`;
@@ -171,7 +171,7 @@ const App = {
     const keyword = document.getElementById('search-input').value || '餐廳|美食';
     const loc = specificLocation || this.mapCenter;
     
-    this.placesService.nearbySearch({ location: loc, radius: '5000', keyword: keyword }, (results, status) => {
+    this.placesService.nearbySearch({ location: loc, radius: '50000', keyword: keyword }, (results, status) => {
       if (status === google.maps.places.PlacesServiceStatus.OK && results) {
         this.searchResults = results;
         document.getElementById('search-here-btn').style.display = 'none';
@@ -238,7 +238,6 @@ const App = {
     this.visibleResults.forEach(place => {
       const div = document.createElement('div');
       div.className = 'restaurant-card';
-      // 🌟 Google 地圖評分維持原樣 (數字)
       div.innerHTML = `<div><strong>${place.name}</strong><br><small>${place.vicinity || ''}</small></div><div>⭐️ ${place.rating || 'N/A'}</div>`;
       
       div.onclick = () => { 
@@ -287,7 +286,6 @@ const App = {
     
     if (!this.brandDatabase[bName]) {
       this.brandDatabase[bName] = { visits: [], menu: [], overall: [], notes: [] };
-      this.saveData();
     } else {
       if (!this.brandDatabase[bName].overall) this.brandDatabase[bName].overall = [];
     }
@@ -296,7 +294,6 @@ const App = {
     document.getElementById('detail-brand').innerText = `📂 品牌：${bName}`;
     document.getElementById('detail-address').innerText = `📍 ${place.vicinity || '無地址'}`;
     
-    // 🌟 Google 地圖評分維持原樣 (數字)
     document.getElementById('detail-rating').innerText = `⭐️ 評分: ${place.rating || 'N/A'}`;
     
     this.renderDetailData(bName);
@@ -306,12 +303,18 @@ const App = {
   renderDetailData(bName) {
     const data = this.brandDatabase[bName];
     
+    // 1. 到訪紀錄 
     const visitsHtml = data.visits.map((date, idx) => `
-      <li style="display:flex; justify-content:space-between; margin-bottom:8px;">
-        ${date} <button style="color:red; border:none; background:none; cursor:pointer" onclick="App.deleteData('visits', ${idx})">刪除</button>
+      <li style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:1px solid #eee; padding-bottom:6px;">
+        <span style="font-size:15px;">${date}</span>
+        <div style="display:flex; gap:10px;">
+          <button style="color:#007AFF; border:none; background:none; cursor:pointer; font-size:14px;" onclick="App.editData('visits', ${idx})">編輯</button>
+          <button style="color:#F44336; border:none; background:none; cursor:pointer; font-size:14px;" onclick="App.deleteData('visits', ${idx})">刪除</button>
+        </div>
       </li>`).join('');
-    document.getElementById('detail-visits').innerHTML = visitsHtml ? `<ul style="padding-left:20px; margin:0;">${visitsHtml}</ul>` : '<p style="color:gray; font-size:14px; margin:0;">尚無紀錄</p>';
+    document.getElementById('detail-visits').innerHTML = visitsHtml ? `<ul style="padding-left:10px; margin:0; list-style:none;">${visitsHtml}</ul>` : '<p style="color:gray; font-size:14px; margin:0;">尚無紀錄</p>';
     
+    // 2. 餐點評價 
     const menuData = data.menu || [];
     const good = menuData.filter(m => m.category === '好吃');
     const normal = menuData.filter(m => m.category === '普通');
@@ -329,7 +332,7 @@ const App = {
             </button>
           </h4>
           ${arr.length > 0 ? arr.map(m => {
-            const realIdx = menuData.indexOf(m);
+            const realIdx = menuData.indexOf(m); 
             return `
               <div style="background:#F9FAFB; padding:10px; margin-bottom:8px; border-radius:6px; border:1px solid #EAEBEE;">
                 <div style="display:flex; justify-content:space-between; align-items:center; font-weight:bold; font-size:14px; margin-bottom:4px;">
@@ -337,7 +340,10 @@ const App = {
                     ${m.title} 
                     ${App.getStarString(m.rating)}
                   </span>
-                  <button style="color:red; border:none; background:none; cursor:pointer; padding:0;" onclick="App.deleteData('menu', ${realIdx})">刪除</button>
+                  <div style="display:flex; gap:8px;">
+                    <button style="color:#007AFF; border:none; background:none; cursor:pointer; padding:0; font-size:13px;" onclick="App.editData('menu', ${realIdx})">編輯</button>
+                    <button style="color:#F44336; border:none; background:none; cursor:pointer; padding:0; font-size:13px;" onclick="App.deleteData('menu', ${realIdx})">刪除</button>
+                  </div>
                 </div>
                 ${m.content ? `<p style="margin:0; font-size:13px; color:#666;">${m.content}</p>` : ''}
               </div>
@@ -353,16 +359,23 @@ const App = {
 
     document.getElementById('detail-menu').innerHTML = menuHtml;
 
+    // 3. 總評價 
     const overallData = data.overall || [];
-    const overallHtml = overallData.map((o, idx) => `
-      <div style="background:#FFF9F5; padding:12px; margin-bottom:10px; border-radius:8px; border:1px solid #FFE4D6;">
-        <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
-          <small style="color:#FF7A00; font-weight:bold;">${o.date}</small>
-          <button style="color:red; border:none; background:none; cursor:pointer; padding:0;" onclick="App.deleteData('overall', ${idx})">刪除</button>
+    const overallHtml = overallData.map((o, idx) => {
+      const titleText = o.title || "總評價"; 
+      return `
+        <div style="background:#FFF9F5; padding:12px; margin-bottom:10px; border-radius:8px; border:1px solid #FFE4D6;">
+          <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+            <strong style="color:#FF7A00; font-size:15px;">${titleText}</strong>
+            <div style="display:flex; gap:10px;">
+              <button style="color:#007AFF; border:none; background:none; cursor:pointer; padding:0; font-size:13px;" onclick="App.editData('overall', ${idx})">編輯</button>
+              <button style="color:#F44336; border:none; background:none; cursor:pointer; padding:0; font-size:13px;" onclick="App.deleteData('overall', ${idx})">刪除</button>
+            </div>
+          </div>
+          ${o.content ? `<p style="margin:0; font-size:14px; color:#333; line-height:1.5;">${o.content}</p>` : ''}
         </div>
-        <p style="margin:0; font-size:14px; color:#333; line-height:1.5;">${o.content}</p>
-      </div>
-    `).join('');
+      `;
+    }).join('');
     
     document.getElementById('detail-overall').innerHTML = overallHtml || '<p style="color:gray; font-size:14px; margin-top:10px;">尚無總評價</p>';
   },
@@ -370,7 +383,6 @@ const App = {
   ensureInList() {
     if (!this.currentDetailPlace) return;
     const place = this.currentDetailPlace;
-    
     let isInAnyList = false;
     for (const listName in this.userLists) {
       if (this.userLists[listName].some(p => p.place_id === place.place_id)) {
@@ -378,7 +390,6 @@ const App = {
         break;
       }
     }
-    
     if (!isInAnyList) {
       if (!this.userLists['未分類']) {
         this.userLists['未分類'] = [];
@@ -388,35 +399,48 @@ const App = {
     }
   },
 
+  // 🌟 開啟 Google 地圖專屬按鈕功能
+  openInGoogleMaps() {
+    if (!this.currentDetailPlace) return;
+    const place = this.currentDetailPlace;
+    
+    // 利用餐廳名稱與 ID 來精準搜尋
+    let url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name)}`;
+    if (place.place_id) {
+      url += `&query_place_id=${place.place_id}`;
+    }
+    
+    // 另開新視窗跳轉至 Google Maps
+    window.open(url, '_blank');
+  },
+
   addVisitDate() {
     const bName = this.getBrandName(this.currentDetailPlace.name);
     const date = prompt("請輸入日期 (YYYY/MM/DD):", new Date().toLocaleDateString('zh-TW'));
     if (date) {
-      this.brandDatabase[bName].visits.unshift(date);
+      this.brandDatabase[bName].visits.unshift(date.trim());
       this.ensureInList(); 
       this.saveData();
       this.renderDetailData(bName);
     }
   },
 
-  // 🌟 餐點評價新增功能 (加入星星評分輸入)
   addMenuNote(category) {
     const bName = this.getBrandName(this.currentDetailPlace.name);
     
     const title = prompt(`新增「${category}」的餐點名稱：`);
-    if (!title) return; // 按取消就退出
+    if (!title) return; 
     
-    // 🌟 詢問這道菜你要給幾顆星
     const ratingInput = prompt("請給這道餐點評分 (1~5顆星)：", "5");
     const rating = parseInt(ratingInput) || 5;
 
     const content = prompt("請輸入評價心得 (可留空)：");
     
     this.brandDatabase[bName].menu.push({
-      title: title,
-      content: content || "",
+      title: title.trim(),
+      content: content ? content.trim() : "",
       category: category,
-      rating: rating // 將星星存入資料庫
+      rating: rating
     });
     
     this.ensureInList(); 
@@ -426,21 +450,73 @@ const App = {
 
   addOverallReview() {
     const bName = this.getBrandName(this.currentDetailPlace.name);
-    const content = prompt("請輸入對這間餐廳的總評價或筆記：");
-    if (!content) return;
+    
+    const title = prompt("請輸入總評價標題 (例如：整體環境、服務態度)：");
+    if (!title) return;
+    
+    const content = prompt("請輸入評價心得細節 (可留空)：");
     
     if (!this.brandDatabase[bName].overall) {
       this.brandDatabase[bName].overall = [];
     }
     
     this.brandDatabase[bName].overall.unshift({
-      date: new Date().toLocaleDateString('zh-TW'),
-      content: content
+      title: title.trim(),
+      content: content ? content.trim() : ""
     });
     
     this.ensureInList();
     this.saveData();
     this.renderDetailData(bName);
+  },
+
+  editData(type, index) {
+    const bName = this.getBrandName(this.currentDetailPlace.name);
+    const item = this.brandDatabase[bName][type][index];
+
+    if (type === 'visits') {
+      const newDate = prompt("修改日期 (YYYY/MM/DD):", item);
+      if (newDate && newDate.trim() !== "") {
+        this.brandDatabase[bName][type][index] = newDate.trim();
+        this.saveData();
+        this.renderDetailData(bName);
+      }
+    } 
+    else if (type === 'menu') {
+      const newTitle = prompt("修改餐點名稱：", item.title);
+      if (!newTitle) return; 
+
+      const ratingInput = prompt("修改評分 (1~5顆星)：", item.rating || 5);
+      const newRating = parseInt(ratingInput) || item.rating || 5;
+
+      const newCategory = item.category;
+      const newContent = prompt("修改評價心得：", item.content || "");
+
+      this.brandDatabase[bName][type][index] = {
+        title: newTitle.trim(),
+        content: newContent ? newContent.trim() : "",
+        rating: newRating,
+        category: newCategory
+      };
+      
+      this.saveData();
+      this.renderDetailData(bName);
+    } 
+    else if (type === 'overall') {
+      const oldTitle = item.title || "總評價";
+      const newTitle = prompt("修改總評價標題：", oldTitle);
+      if (!newTitle) return;
+
+      const newContent = prompt("修改評價心得細節：", item.content || "");
+      
+      this.brandDatabase[bName][type][index] = {
+        title: newTitle.trim(),
+        content: newContent ? newContent.trim() : ""
+      };
+      
+      this.saveData();
+      this.renderDetailData(bName);
+    }
   },
 
   deleteData(type, index) {
@@ -477,9 +553,6 @@ const App = {
     this.saveData();
   },
 
-  // ==========================================
-  // 6. 我的清單
-  // ==========================================
   renderLists() {
     const container = document.getElementById('my-lists-container');
     container.innerHTML = ''; 
@@ -495,8 +568,12 @@ const App = {
       section.style.margin = '15px';
       
       const h3 = document.createElement('h3');
-      h3.innerHTML = `${this.listEmojis[name]} ${name} (${restaurants.length}) 
-        <button onclick="App.deleteList('${name}')" style="background:none; color:#FF4D4F; border:none; cursor:pointer; font-weight:bold;">刪除</button>`;
+      h3.style.display = 'flex';
+      h3.style.justifyContent = 'space-between';
+      h3.style.alignItems = 'center';
+      h3.style.margin = '0 0 10px 0';
+      h3.innerHTML = `<span>${this.listEmojis[name]} ${name} (${restaurants.length})</span> 
+        <button onclick="App.deleteList('${name}')" style="background:none; color:#FF4D4F; border:none; cursor:pointer; font-weight:bold; font-size:14px; padding:0;">刪除</button>`;
       section.appendChild(h3);
 
       const ul = document.createElement('ul');
@@ -507,15 +584,38 @@ const App = {
           const li = document.createElement('li');
           li.style.listStyle = 'none';
           li.style.marginBottom = '12px';
-          li.innerHTML = `<span style="color:var(--primary); font-weight:bold; font-size:16px; cursor:pointer; text-decoration:underline;">📍 ${r.name}</span>`;
           
-          li.onclick = () => {
+          const wrapper = document.createElement('div');
+          wrapper.style.display = 'flex';
+          wrapper.style.justifyContent = 'space-between';
+          wrapper.style.alignItems = 'center';
+
+          const nameSpan = document.createElement('span');
+          nameSpan.innerHTML = `📍 ${r.name}`;
+          nameSpan.style.cssText = 'color:var(--primary); font-weight:bold; font-size:16px; cursor:pointer; text-decoration:underline;';
+          nameSpan.onclick = () => {
             if (this.map && r.geometry && r.geometry.location) {
               this.map.setCenter(r.geometry.location);
               this.map.setZoom(17);
             }
             this.openDetail(r);
           };
+
+          const removeBtn = document.createElement('button');
+          removeBtn.innerText = '移除';
+          removeBtn.style.cssText = 'color:red; background:none; border:none; font-size:13px; cursor:pointer; padding:5px;';
+          removeBtn.onclick = (e) => {
+            e.stopPropagation(); 
+            if(confirm(`確定要從「${name}」中移除 ${r.name} 嗎？`)) {
+              this.userLists[name] = this.userLists[name].filter(p => p.place_id !== r.place_id);
+              this.saveData();
+              this.renderLists();
+            }
+          };
+
+          wrapper.appendChild(nameSpan);
+          wrapper.appendChild(removeBtn);
+          li.appendChild(wrapper);
           ul.appendChild(li);
         });
       } else {
@@ -592,9 +692,6 @@ const App = {
     this.closeModal();
   },
 
-  // ==========================================
-  // 7. 品牌管理與底層機制
-  // ==========================================
   showBrandRenameModal() {
     const oldBrand = this.getBrandName(this.currentDetailPlace.name);
     const newBrand = prompt("修改這間餐廳的歸屬品牌：", oldBrand);
