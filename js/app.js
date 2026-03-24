@@ -23,7 +23,6 @@ const App = {
   activeListFilters: new Set(),
   
   currentDetailPlace: null,
-  compassCandidates: [], 
 
   async init() {
     console.log("🚀 系統初始化中...");
@@ -96,7 +95,7 @@ const App = {
       if (dataStr && dataStr.includes('brandDatabase')) {
         const data = JSON.parse(dataStr);
         this.userLists = data.userLists || { '未分類': [] };
-        this.listEmojis = data.listEmojis || {}; // 先接收資料庫裡的設定
+        this.listEmojis = data.listEmojis || {}; 
         this.brandDatabase = data.brandDatabase || {};
         this.brandMappings = data.brandMappings || {};
         console.log("✅ 成功從試算表載入資料！");
@@ -113,13 +112,12 @@ const App = {
       }
     }
 
-    // 🌟 【自動修復防呆機制】：檢查所有清單，如果沒有專屬的 Emoji，就自動補上 🔖
     if (!this.listEmojis['未分類']) {
       this.listEmojis['未分類'] = '🔖';
     }
     for (let listName in this.userLists) {
       if (!this.listEmojis[listName]) {
-        this.listEmojis[listName] = '🔖'; // 舊清單自動獲得預設圖示，就不會跑出 undefined 了
+        this.listEmojis[listName] = '🔖'; 
       }
     }
   },
@@ -194,6 +192,14 @@ const App = {
     this.performSearch();
   },
 
+  // 🌟 開關底部面板的專屬功能
+  toggleBottomSheet() {
+    const sheet = document.getElementById('list-container');
+    if (sheet) {
+      sheet.classList.toggle('collapsed');
+    }
+  },
+
   performSearch(specificLocation = null) {
     const keyword = document.getElementById('search-input').value || '餐廳|美食';
     const loc = specificLocation || this.mapCenter;
@@ -205,6 +211,12 @@ const App = {
         document.getElementById('search-here-btn').style.display = 'none';
         this.rebuildMarkers();
         this.updateVisibleRestaurants();
+        
+        // 🌟 搜尋完成後，自動展開底部面板讓你選餐廳
+        const sheet = document.getElementById('list-container');
+        if (sheet) {
+          sheet.classList.remove('collapsed');
+        }
       }
     });
   },
@@ -237,7 +249,7 @@ const App = {
                strokeColor: '#FF7A00' 
              },
              label: { 
-               text: this.listEmojis[listName] || '🔖', // 確保一定有圖示
+               text: this.listEmojis[listName] || '🔖', 
                fontSize: '16px' 
              }, 
              zIndex: 1000 
@@ -840,51 +852,6 @@ const App = {
       this.saveData();
       this.renderLists();
     }
-  },
-
-  spinCompass() {
-    const allRest = Object.values(this.userLists).flat();
-    if (allRest.length === 0) return alert("清單內沒有餐廳可以抽！快去首頁搜尋並加入清單吧。");
-    
-    let uniqueMap = new Map();
-    allRest.forEach(r => uniqueMap.set(r.place_id, r));
-    this.compassCandidates = Array.from(uniqueMap.values());
-
-    let html = `
-      <h3 style="margin-top:0; color:var(--primary);">🧭 羅盤抽籤</h3>
-      <p style="color:#555; font-size:14px; margin-bottom:15px;">請勾選你想加入抽籤的餐廳：</p>
-      <div style="max-height: 40vh; overflow-y: auto; background:#f9f9f9; padding:10px; border-radius:8px; margin-bottom:15px; border:1px solid #eee;">
-    `;
-    
-    this.compassCandidates.forEach((r, idx) => {
-      html += `
-        <label style="display:flex; align-items:center; margin-bottom:12px; cursor:pointer; font-size:15px; color:#333;">
-          <input type="checkbox" class="compass-checkbox" value="${idx}" checked style="transform: scale(1.3); margin-right:12px;"> 
-          ${r.name}
-        </label>
-      `;
-    });
-
-    html += `
-      </div>
-      <div class="modal-actions" style="justify-content: space-between;">
-        <button onclick="App.closeModal()" style="background:#eee; color:#333; border:none; padding:10px 18px; border-radius:20px; font-weight:bold; cursor:pointer;">取消</button>
-        <button class="btn-primary" onclick="App.executeCompass()">🎰 開始抽籤</button>
-      </div>
-    `;
-    this.openModal(html);
-  },
-
-  executeCompass() {
-    const checkboxes = document.querySelectorAll('.compass-checkbox:checked');
-    if (checkboxes.length === 0) return alert("❌ 請至少勾選一間餐廳喔！");
-    
-    const selectedIndices = Array.from(checkboxes).map(cb => parseInt(cb.value));
-    const pickIdx = selectedIndices[Math.floor(Math.random() * selectedIndices.length)];
-    const pick = this.compassCandidates[pickIdx];
-    
-    alert(`🧭 羅盤結果：\n\n🎉 ${pick.name}\n📍 ${pick.vicinity || '無地址資訊'}\n\n就決定吃這家了！`);
-    this.closeModal();
   },
 
   showBrandRenameModal() {

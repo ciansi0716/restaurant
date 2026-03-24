@@ -2,9 +2,73 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>My Food Map</title>
   <link rel="stylesheet" href="css/style.css">
+  
+  <style>
+    /* 🌟 手機版瀏覽器網址列與安全區域修正 */
+    body, html {
+      height: 100dvh !important; /* 動態視口高度，不受網址列影響 */
+      overflow: hidden;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      /* 避開手機頂部瀏海/狀態列 */
+      padding-top: max(10px, env(safe-area-inset-top)) !important;
+      z-index: 2000;
+    }
+    
+    /* 🌟 首頁地圖滿版設計 */
+    #view-home .main-content {
+      position: relative;
+      height: 100%;
+      width: 100%;
+    }
+    #map-container {
+      height: 100% !important;
+      width: 100%;
+      position: absolute;
+      top: 0; left: 0;
+    }
+    
+    /* 🌟 底部可收折列表 (Bottom Sheet) */
+    #list-container {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 50dvh !important; /* 展開時佔螢幕一半 */
+      background: var(--surface, #ffffff);
+      border-radius: 24px 24px 0 0;
+      box-shadow: 0 -4px 20px rgba(0,0,0,0.15);
+      transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+    }
+    /* 收起狀態：只露出頂部的把手與標題 (約 60px) */
+    #list-container.collapsed {
+      transform: translateY(calc(100% - 60px)); 
+    }
+    /* 頂部小把手 */
+    .sheet-handle {
+      width: 100%;
+      height: 25px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+    }
+    .sheet-handle::before {
+      content: "";
+      width: 40px;
+      height: 5px;
+      background-color: #ccc;
+      border-radius: 3px;
+    }
+  </style>
 </head>
 <body>
 
@@ -14,9 +78,6 @@
     </div>
     
     <div class="header-actions" style="display: flex; gap: 8px;">
-      <button onclick="App.spinCompass()" style="width: auto; padding: 0 12px; border-radius: 20px; font-weight: bold; display: flex; align-items: center; gap: 5px;">
-        🧭 抽籤
-      </button>
       <button onclick="App.navigate('lists')" style="width: auto; padding: 0 12px; border-radius: 20px; font-weight: bold; display: flex; align-items: center; gap: 5px;">
         📁 清單
       </button>
@@ -24,31 +85,32 @@
   </header>
 
   <div id="view-home" class="view-container active">
-    <div class="search-container">
+    <div class="search-container" style="position: relative; z-index: 1001; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
       <input type="text" id="search-input" placeholder="搜尋附近美食、餐廳..." onkeypress="if(event.key === 'Enter') App.searchInCurrentArea()">
       <button onclick="App.searchInCurrentArea()">搜尋</button>
     </div>
 
-    <div class="main-content" style="display: flex; flex-direction: column; height: 100%;">
+    <div class="main-content">
       
-      <div id="map-container" style="flex: 1; position: relative; min-height: 40vh;">
+      <div id="map-container">
         <div id="map" style="width: 100%; height: 100%; background-color: #e0e0e0;"></div>
         
-        <button id="search-here-btn" class="overlay-btn" style="display:none;" onclick="App.searchInCurrentArea()">
+        <button id="search-here-btn" class="overlay-btn" style="display:none; top: 10px;" onclick="App.searchInCurrentArea()">
           🔄 搜尋這個區域
         </button>
-        <button class="overlay-btn filter-btn" onclick="App.showFilterLayerModal()">
-          圖層
+        <button class="overlay-btn filter-btn" style="top: 10px;" onclick="App.showFilterLayerModal()">
+          🗺️ 圖層
         </button>
-        <button class="overlay-btn locate-btn" style="top: 135px; bottom: auto; right: 20px; width: 44px; height: 44px; padding: 0; justify-content: center;" onclick="App.centerToUserLocation()" title="回到我的位置">
+        <button class="overlay-btn locate-btn" style="top: 65px; bottom: auto; right: 20px; width: 44px; height: 44px; padding: 0; justify-content: center;" onclick="App.centerToUserLocation()" title="回到我的位置">
           📍
         </button>
       </div>
 
-      <div id="list-container" style="height: 40vh; display: flex; flex-direction: column; background: var(--surface); z-index: 10; box-shadow: 0 -4px 10px rgba(0,0,0,0.1);">
-        <div class="list-header" style="flex-shrink: 0;">
+      <div id="list-container" class="collapsed">
+        <div class="sheet-handle" onclick="App.toggleBottomSheet()"></div>
+        <div class="list-header" style="flex-shrink: 0; cursor:pointer; padding-top: 0;" onclick="App.toggleBottomSheet()">
           <span id="result-count">搜尋中...</span>
-          <label style="display:flex; align-items:center; gap:5px; cursor:pointer; font-weight:normal;">
+          <label style="display:flex; align-items:center; gap:5px; cursor:pointer; font-weight:normal;" onclick="event.stopPropagation();">
             <input type="checkbox" id="open-now-toggle" onchange="App.updateVisibleRestaurants()"> 僅顯示營業中
           </label>
         </div>
@@ -66,7 +128,7 @@
       <h2 id="detail-title">餐廳名稱</h2>
       
       <button onclick="App.showAddToListModal()" title="加入清單" style="width: auto; padding: 4px 12px; border-radius: 20px; font-weight: bold; display: flex; align-items: center; gap: 5px; font-size: 14px; border: 1px solid var(--primary); color: var(--primary); background: white;">
-        加入清單
+        🔖 加入清單
       </button>
     </div>
 
