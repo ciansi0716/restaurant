@@ -66,11 +66,11 @@
 
   <header style="justify-content: space-between;">
     <div style="font-size: 18px; font-weight: 800; color: var(--primary); display: flex; align-items: center; gap: 8px;">
-      🍽️ My Food Map
+      探店紀錄
     </div>
     <div class="header-actions" style="display: flex; gap: 8px;">
       <button onclick="App.navigate('lists')" style="width: auto; padding: 0 12px; border-radius: 20px; font-weight: bold; display: flex; align-items: center; gap: 5px;">
-        📁 清單
+        美食清單
       </button>
     </div>
   </header>
@@ -86,7 +86,7 @@
       <div id="map-container">
         <div id="map" style="width: 100%; height: 100%; background-color: #e0e0e0;"></div>
         <button id="search-here-btn" class="overlay-btn" style="display:none; top: 10px;" onclick="App.searchInCurrentArea()">
-          🔄 搜尋這個區域
+          🔄搜尋這個區域
         </button>
         <button class="overlay-btn filter-btn" style="top: 10px;" onclick="App.showFilterLayerModal()">
           圖層
@@ -115,7 +115,7 @@
       <button onclick="App.navigate('home')">⬅️</button>
       <h2 id="detail-title">餐廳名稱</h2>
       <button onclick="App.showAddToListModal()" title="加入清單" style="width: auto; padding: 4px 12px; border-radius: 20px; font-weight: bold; display: flex; align-items: center; gap: 5px; font-size: 14px; border: 1px solid var(--primary); color: var(--primary); background: white;">
-        🔖 加入清單
+        加入清單
       </button>
     </div>
 
@@ -126,12 +126,12 @@
           <button onclick="App.showBrandRenameModal()" style="font-size:12px; padding:4px 8px; border-radius:12px; border:1px solid #FF7A00; background:white; color:#FF7A00; cursor:pointer;">✏️ 修改</button>
         </h3>
         <p id="detail-address">地址</p>
-        <p id="detail-rating">⭐️ 評分</p>
+        <p id="detail-rating">⭐️評分</p>
         <div id="detail-lists-badges" style="margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px;"></div>
       </div>
 
       <div style="display:flex; gap:10px; margin-bottom: 20px;">
-        <button class="action-btn btn-primary" onclick="App.addVisitDate()" style="margin-top:0; flex:1;">📅 新增到訪日</button>
+        <button class="action-btn btn-primary" onclick="App.addVisitDate()" style="margin-top:0; flex:1;">📅新增到訪日</button>
         <button class="action-btn" onclick="App.openInGoogleMaps()" style="margin-top:0; flex:1; background-color: #4285F4; border-color: #4285F4; color: white;">🗺️ Google 地圖</button>
       </div>
 

@@ -1,7 +1,7 @@
 // ==========================================
 // 🌟 Google Apps Script (試算表 API) 網址
 // ==========================================
-const GAS_URL = "https://script.google.com/macros/s/AKfycbzY78FVNqEzvUk83Z82Rvbjhyc1qQhfb2k9wSZtdk8E4ZNhKIujxh0v1-6WYwpSJtYWyA/exec";
+const GAS_URL = "https://script.google.com/macros/s/AKfycbyeOz9yNccHJoy-CTaAhgMWC6XhpzNgRX4IBm6HGXZsY0p5FMq9zJteSHbAGCAV-60eMA/exec";
 
 const App = {
   map: null,
@@ -24,6 +24,10 @@ const App = {
   expandedLists: new Set(), 
   
   currentDetailPlace: null,
+
+  // 🌟 用來暫存編輯視窗的圖片狀態
+  tempMenuImageUrl: null,
+  tempOverallImages: [],
 
   async init() {
     console.log("🚀 系統初始化中...");
@@ -145,8 +149,48 @@ const App = {
     }
   },
 
+  // 🌟 已移除自動壓縮功能，改為上傳原檔
+  async uploadImageFile(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = async (e) => {
+        // 直接取得 Base64 原檔編碼
+        const base64Data = e.target.result.split(',')[1];
+        
+        try {
+          const res = await fetch(GAS_URL, {
+            method: 'POST',
+            redirect: 'follow',
+            headers: {
+              'Content-Type': 'text/plain;charset=utf-8'
+            },
+            body: JSON.stringify({
+              action: 'uploadImage',
+              data: base64Data,
+              mimeType: file.type,
+              filename: file.name
+            })
+          });
+          const result = await res.json();
+          
+          if (result.error) {
+            reject(new Error("後端錯誤: " + result.error));
+          } else {
+            resolve(result.url);
+          }
+        } catch(error) {
+          reject(error);
+        }
+      };
+      reader.onerror = reject;
+    });
+  },
+
   getStarString(rating) {
-    if (!rating) return '';
+    if (rating === null || rating === undefined || rating === '' || isNaN(rating)) {
+      return `<span style="color:#999; font-size:13px; margin-left:6px;">(無評分)</span>`;
+    }
     const rounded = Math.max(1, Math.min(5, Math.round(rating))); 
     const full = '★'.repeat(rounded);
     const empty = '☆'.repeat(5 - rounded);
@@ -201,26 +245,21 @@ const App = {
     }
   },
 
-  // 🌟 一般搜尋 (500公尺，模糊比對)
   searchInCurrentArea() {
     this.performSearch(this.map.getCenter(), '500', false);
   },
 
-  // 🌟 進階搜尋 (50000公尺，嚴格名稱比對)
   advancedSearch() {
     const rawKeyword = document.getElementById('search-input').value.trim();
     if (!rawKeyword) {
       alert("⚠️ 進階搜尋需要請您先輸入「餐廳名稱」喔！");
       return;
     }
-    // 傳入 true 開啟嚴格模式
     this.performSearch(this.map.getCenter(), '50000', true);
   },
 
-  // 🌟 核心修改：整合半徑與嚴格過濾開關
   performSearch(specificLocation = null, radius = '500', isAdvanced = false) {
     const rawKeyword = document.getElementById('search-input').value.trim();
-    // 如果是一般搜尋且沒打字，給予預設值找附近美食
     const searchKeyword = rawKeyword || (isAdvanced ? rawKeyword : '餐廳|美食|小吃|晚餐|飲食');
     const loc = specificLocation || this.mapCenter;
     
@@ -232,14 +271,12 @@ const App = {
       
       if (status === google.maps.places.PlacesServiceStatus.OK && results) {
         if (isAdvanced && this.lastKeyword) {
-          // 🚀 進階搜尋：嚴格剃除，餐廳名稱「必須」包含你輸入的字！
           finalResults = results.filter(p => p.name.toLowerCase().includes(this.lastKeyword));
         } else {
           finalResults = [...results];
         }
       }
 
-      // 保留清單強制召喚功能 (讓你清單裡的店絕對不漏接)
       if (this.lastKeyword) {
         const addedIds = new Set(finalResults.map(p => p.place_id));
         for (const listName in this.userLists) {
@@ -491,9 +528,22 @@ const App = {
     container.innerHTML = badgesHtml;
   },
 
+  showImageModal(imageUrl) {
+    const html = `
+      <div style="text-align:center;">
+        <img src="${imageUrl}" style="max-width:100%; max-height:70vh; border-radius:8px; object-fit:contain;">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-primary" onclick="App.closeModal()" style="width:100%;">關閉</button>
+      </div>
+    `;
+    this.openModal(html);
+  },
+
   renderDetailData(bName) {
     const data = this.brandDatabase[bName];
     
+    // 歷史紀錄
     const visitsHtml = data.visits.map((date, idx) => `
       <li style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:1px solid #eee; padding-bottom:6px;">
         <span style="font-size:15px;">${date}</span>
@@ -504,6 +554,7 @@ const App = {
       </li>`).join('');
     document.getElementById('detail-visits').innerHTML = visitsHtml ? `<ul style="padding-left:10px; margin:0; list-style:none;">${visitsHtml}</ul>` : '<p style="color:gray; font-size:14px; margin:0;">尚無紀錄</p>';
     
+    // 餐點評價
     const menuData = data.menu || [];
     const good = menuData.filter(m => m.category === '好吃');
     const normal = menuData.filter(m => m.category === '普通');
@@ -535,6 +586,7 @@ const App = {
                   </div>
                 </div>
                 ${m.content ? `<p style="margin:0; font-size:13px; color:#666;">${m.content}</p>` : ''}
+                ${m.imageUrl ? `<div style="margin-top: 8px;"><button onclick="App.showImageModal('${m.imageUrl}')" style="background:#f0f0f0; border:1px solid #ddd; padding:5px 10px; border-radius:15px; cursor:pointer; font-size:13px;">📷</button></div>` : ''}
               </div>
             `;
           }).join('') : `<p style="color:gray; font-size:13px; margin:0;">尚無紀錄</p>`}
@@ -548,9 +600,17 @@ const App = {
 
     document.getElementById('detail-menu').innerHTML = menuHtml;
 
+    // 🌟 總評價 (支援多圖預覽顯示)
     const overallData = data.overall || [];
     const overallHtml = overallData.map((o, idx) => {
       const titleText = o.title || "總評價"; 
+      
+      // 處理相容舊版的單圖與新版的多圖
+      let urls = o.imageUrls ? o.imageUrls : (o.imageUrl ? [o.imageUrl] : []);
+      let imgsHtml = urls.map(url => `
+        <img src="${url}" style="width:80px; height:80px; object-fit:cover; border-radius:6px; cursor:pointer; border:1px solid #FFE4D6;" onclick="App.showImageModal('${url}')">
+      `).join('');
+
       return `
         <div style="background:#FFF9F5; padding:12px; margin-bottom:10px; border-radius:8px; border:1px solid #FFE4D6;">
           <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
@@ -560,7 +620,8 @@ const App = {
               <button style="color:#F44336; border:none; background:none; cursor:pointer; padding:0; font-size:13px;" onclick="App.deleteData('overall', ${idx})">刪除</button>
             </div>
           </div>
-          ${o.content ? `<p style="margin:0; font-size:14px; color:#333; line-height:1.5;">${o.content}</p>` : ''}
+          ${o.content ? `<p style="margin:0 0 8px 0; font-size:14px; color:#333; line-height:1.5;">${o.content}</p>` : ''}
+          ${imgsHtml ? `<div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">${imgsHtml}</div>` : ''}
         </div>
       `;
     }).join('');
@@ -706,29 +767,51 @@ const App = {
           </select>
         </div>
         <div style="flex:1;">
-          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評分 (1~5星)</label>
-          <input type="number" id="menu-form-rating" min="1" max="5" value="5" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
+          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評分 (可留空)</label>
+          <input type="number" id="menu-form-rating" min="1" max="5" placeholder="1~5星" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
         </div>
       </div>
-      <div style="margin-bottom: 15px; text-align: left;">
+      <div style="margin-bottom: 12px; text-align: left;">
         <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評價心得</label>
         <textarea id="menu-form-content" rows="3" placeholder="請輸入心得 (可留空)" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px; resize:vertical; font-family:inherit;"></textarea>
       </div>
+      <div style="margin-bottom: 15px; text-align: left;">
+        <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">上傳照片 (無壓縮原檔)</label>
+        <input type="file" id="menu-form-image" accept="image/*" style="width:100%; font-size:14px;">
+      </div>
       <div class="modal-actions" style="display:flex; gap:10px;">
         <button onclick="App.closeModal()" style="flex:1; background:#eee; color:#333; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">取消</button>
-        <button onclick="App.submitMenuNote()" style="flex:1; background:var(--primary); color:white; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">儲存</button>
+        <button id="save-menu-btn" onclick="App.submitMenuNote()" style="flex:1; background:var(--primary); color:white; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">儲存</button>
       </div>
     `;
     this.openModal(html);
   },
 
-  submitMenuNote() {
+  async submitMenuNote() {
     const title = document.getElementById('menu-form-title').value.trim();
     if (!title) return alert("請輸入餐點名稱！");
 
+    const btn = document.getElementById('save-menu-btn');
+    btn.disabled = true;
+    btn.innerText = '上傳與儲存中...';
+
     const category = document.getElementById('menu-form-category').value;
-    const rating = parseInt(document.getElementById('menu-form-rating').value) || 5;
+    const ratingRaw = document.getElementById('menu-form-rating').value;
+    const rating = ratingRaw === '' ? null : parseInt(ratingRaw);
     const content = document.getElementById('menu-form-content').value.trim();
+    
+    let imageUrl = null;
+    const fileInput = document.getElementById('menu-form-image');
+    if (fileInput.files.length > 0) {
+      try {
+        imageUrl = await this.uploadImageFile(fileInput.files[0]);
+      } catch (e) {
+        alert("照片上傳失敗！原因：" + e.message);
+        btn.disabled = false;
+        btn.innerText = '儲存';
+        return;
+      }
+    }
 
     const bName = this.getBrandName(this.currentDetailPlace.name);
     
@@ -736,7 +819,8 @@ const App = {
       title: title,
       content: content,
       category: category,
-      rating: rating
+      rating: rating,
+      imageUrl: imageUrl
     });
     
     this.ensureInList(); 
@@ -745,25 +829,34 @@ const App = {
     this.closeModal();
   },
 
-  addOverallReview() {
-    const bName = this.getBrandName(this.currentDetailPlace.name);
-    const title = prompt("請輸入總評價標題 (例如：整體環境、服務態度)：");
-    if (!title) return;
+  // 🌟 移除暫存的單一菜單圖片
+  removeTempMenuImage() {
+    this.tempMenuImageUrl = null;
+    document.getElementById('menu-edit-img-container').style.display = 'none';
+  },
+
+  // 🌟 移除暫存的總評價多張圖片之一
+  removeTempOverallImage(index) {
+    this.tempOverallImages.splice(index, 1);
+    this.renderTempOverallImages();
+  },
+
+  // 🌟 渲染總評價編輯時的預覽圖片列
+  renderTempOverallImages() {
+    const container = document.getElementById('overall-edit-imgs');
+    if(!container) return;
     
-    const content = prompt("請輸入評價心得細節 (可留空)：");
-    
-    if (!this.brandDatabase[bName].overall) {
-      this.brandDatabase[bName].overall = [];
+    if (this.tempOverallImages.length === 0) {
+      container.innerHTML = '<span style="font-size:13px; color:#999;">目前沒有照片</span>';
+      return;
     }
     
-    this.brandDatabase[bName].overall.unshift({
-      title: title.trim(),
-      content: content ? content.trim() : ""
-    });
-    
-    this.ensureInList();
-    this.saveData();
-    this.renderDetailData(bName);
+    container.innerHTML = this.tempOverallImages.map((url, i) => `
+      <div style="position:relative; display:inline-block;">
+        <img src="${url}" style="width:60px; height:60px; object-fit:cover; border-radius:6px; border:1px solid #ccc;">
+        <button onclick="App.removeTempOverallImage(${i})" style="position:absolute; top:-6px; right:-6px; background:#F44336; color:white; border:none; border-radius:50%; width:20px; height:20px; font-size:10px; font-weight:bold; cursor:pointer; padding:0; display:flex; justify-content:center; align-items:center;">✕</button>
+      </div>
+    `).join('');
   },
 
   editData(type, index) {
@@ -779,6 +872,10 @@ const App = {
       }
     } 
     else if (type === 'menu') {
+      // 🌟 編輯餐點：支援刪除單一圖片
+      this.tempMenuImageUrl = item.imageUrl || null;
+      const ratingValue = (item.rating === null || item.rating === undefined) ? '' : item.rating;
+      
       const html = `
         <h3 style="margin-top:0">編輯餐點評價</h3>
         <div style="margin-bottom: 12px; text-align: left;">
@@ -788,60 +885,217 @@ const App = {
         <div style="display:flex; gap:10px; margin-bottom: 12px; text-align: left;">
           <div style="flex:1;">
             <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">分類</label>
-            <select id="menu-form-category" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px; background:white;">
-              <option value="好吃" ${item.category === '好吃' ? 'selected' : ''}>😋 好吃</option>
-              <option value="普通" ${item.category === '普通' ? 'selected' : ''}>😐 普通</option>
-              <option value="難吃" ${item.category === '難吃' ? 'selected' : ''}>🤮 難吃</option>
-            </select>
+            <input type="hidden" id="menu-form-category" value="${item.category}">
+            <div style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #eee; border-radius:6px; font-size:15px; background:#f9f9f9; color:#666;">
+              ${item.category === '好吃' ? '😋 好吃' : item.category === '普通' ? '😐 普通' : '🤮 難吃'}
+            </div>
           </div>
           <div style="flex:1;">
-            <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評分 (1~5星)</label>
-            <input type="number" id="menu-form-rating" min="1" max="5" value="${item.rating || 5}" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
+            <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評分 (可留空)</label>
+            <input type="number" id="menu-form-rating" min="1" max="5" value="${ratingValue}" placeholder="1~5星" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
           </div>
         </div>
-        <div style="margin-bottom: 15px; text-align: left;">
+        <div style="margin-bottom: 12px; text-align: left;">
           <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評價心得</label>
           <textarea id="menu-form-content" rows="3" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px; resize:vertical; font-family:inherit;">${item.content || ''}</textarea>
         </div>
+        <div style="margin-bottom: 15px; text-align: left;">
+          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">目前照片</label>
+          <div id="menu-edit-img-container" style="${this.tempMenuImageUrl ? 'display:flex;' : 'display:none;'} gap:10px; align-items:center; margin-bottom:10px;">
+             <button onclick="App.showImageModal(App.tempMenuImageUrl)" style="background:#f0f0f0; border:1px solid #ddd; padding:5px 10px; border-radius:15px; cursor:pointer; font-size:13px;">📷</button>
+             <button onclick="App.removeTempMenuImage()" style="background:#FFEbee; color:#F44336; border:1px solid #FFCDD2; padding:5px 10px; border-radius:15px; cursor:pointer; font-size:13px;">刪除</button>
+          </div>
+          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">上傳新照片 (會覆蓋目前照片)</label>
+          <input type="file" id="menu-form-image" accept="image/*" style="width:100%; font-size:14px;">
+        </div>
         <div class="modal-actions" style="display:flex; gap:10px;">
           <button onclick="App.closeModal()" style="flex:1; background:#eee; color:#333; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">取消</button>
-          <button onclick="App.submitMenuEdit(${index})" style="flex:1; background:var(--primary); color:white; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">儲存</button>
+          <button id="save-menu-edit-btn" onclick="App.submitMenuEdit(${index})" style="flex:1; background:var(--primary); color:white; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">儲存</button>
         </div>
       `;
       this.openModal(html);
     } 
     else if (type === 'overall') {
-      const oldTitle = item.title || "總評價";
-      const newTitle = prompt("修改總評價標題：", oldTitle);
-      if (!newTitle) return;
-
-      const newContent = prompt("修改評價心得細節：", item.content || "");
+      // 🌟 編輯總評價：支援多圖刪除、新增
+      this.tempOverallImages = item.imageUrls ? [...item.imageUrls] : (item.imageUrl ? [item.imageUrl] : []);
       
-      this.brandDatabase[bName][type][index] = {
-        title: newTitle.trim(),
-        content: newContent ? newContent.trim() : ""
-      };
+      const html = `
+        <h3 style="margin-top:0">編輯總評價</h3>
+        <div style="margin-bottom: 12px; text-align: left;">
+          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評價標題</label>
+          <input type="text" id="overall-form-title" value="${item.title || ''}" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
+        </div>
+        <div style="margin-bottom: 12px; text-align: left;">
+          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評價細節</label>
+          <textarea id="overall-form-content" rows="4" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px; resize:vertical; font-family:inherit;">${item.content || ''}</textarea>
+        </div>
+        <div style="margin-bottom: 15px; text-align: left;">
+          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">目前照片</label>
+          <div id="overall-edit-imgs" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px; min-height: 20px;"></div>
+          
+          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">上傳更多照片 (可多選)</label>
+          <input type="file" id="overall-form-image" accept="image/*" multiple style="width:100%; font-size:14px;">
+        </div>
+        <div class="modal-actions" style="display:flex; gap:10px;">
+          <button onclick="App.closeModal()" style="flex:1; background:#eee; color:#333; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">取消</button>
+          <button id="save-overall-edit-btn" onclick="App.submitOverallEdit(${index})" style="flex:1; background:var(--primary); color:white; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">儲存</button>
+        </div>
+      `;
+      this.openModal(html);
       
-      this.saveData();
-      this.renderDetailData(bName);
+      // 等待 DOM 繪製後立刻渲染目前多圖
+      setTimeout(() => this.renderTempOverallImages(), 50);
     }
   },
 
-  submitMenuEdit(index) {
+  async submitMenuEdit(index) {
     const title = document.getElementById('menu-form-title').value.trim();
     if (!title) return alert("請輸入餐點名稱！");
+    
+    const btn = document.getElementById('save-menu-edit-btn');
+    btn.disabled = true;
+    btn.innerText = '上傳與儲存中...';
 
     const category = document.getElementById('menu-form-category').value;
-    const rating = parseInt(document.getElementById('menu-form-rating').value) || 5;
+    const ratingRaw = document.getElementById('menu-form-rating').value;
+    const rating = ratingRaw === '' ? null : parseInt(ratingRaw);
     const content = document.getElementById('menu-form-content').value.trim();
 
     const bName = this.getBrandName(this.currentDetailPlace.name);
+    
+    // 如果有在編輯視窗中按下「刪除」，this.tempMenuImageUrl 會變成 null
+    let imageUrl = this.tempMenuImageUrl; 
+    
+    const fileInput = document.getElementById('menu-form-image');
+    // 如果有上傳新檔案，直接覆蓋舊的/空的
+    if (fileInput.files.length > 0) {
+      try {
+        imageUrl = await this.uploadImageFile(fileInput.files[0]);
+      } catch (e) {
+        alert("照片上傳失敗！原因：" + e.message);
+        btn.disabled = false;
+        btn.innerText = '儲存';
+        return;
+      }
+    }
 
     this.brandDatabase[bName].menu[index] = {
       title: title,
       content: content,
       rating: rating,
-      category: category
+      category: category,
+      imageUrl: imageUrl
+    };
+    
+    this.saveData();
+    this.renderDetailData(bName);
+    this.closeModal();
+  },
+
+  // 🌟 總評價：新增時支援多檔案上傳
+  addOverallReview() {
+    const html = `
+      <h3 style="margin-top:0">新增總評價</h3>
+      <div style="margin-bottom: 12px; text-align: left;">
+        <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評價標題</label>
+        <input type="text" id="overall-form-title" placeholder="例如：整體環境、服務態度" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
+      </div>
+      <div style="margin-bottom: 12px; text-align: left;">
+        <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評價細節</label>
+        <textarea id="overall-form-content" rows="4" placeholder="請輸入細節 (可留空)" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px; resize:vertical; font-family:inherit;"></textarea>
+      </div>
+      <div style="margin-bottom: 15px; text-align: left;">
+        <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">上傳照片 (支援多張)</label>
+        <input type="file" id="overall-form-image" accept="image/*" multiple style="width:100%; font-size:14px;">
+      </div>
+      <div class="modal-actions" style="display:flex; gap:10px;">
+        <button onclick="App.closeModal()" style="flex:1; background:#eee; color:#333; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">取消</button>
+        <button id="save-overall-btn" onclick="App.submitOverallNote()" style="flex:1; background:var(--primary); color:white; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">儲存</button>
+      </div>
+    `;
+    this.openModal(html);
+  },
+
+  async submitOverallNote() {
+    const title = document.getElementById('overall-form-title').value.trim();
+    if (!title) return alert("請輸入標題！");
+
+    const btn = document.getElementById('save-overall-btn');
+    btn.disabled = true;
+    btn.innerText = '上傳多圖與儲存中...';
+
+    const content = document.getElementById('overall-form-content').value.trim();
+    
+    let imageUrls = [];
+    const fileInput = document.getElementById('overall-form-image');
+    
+    // 多張圖片逐一上傳
+    if (fileInput.files.length > 0) {
+      try {
+        for (let i = 0; i < fileInput.files.length; i++) {
+            let url = await this.uploadImageFile(fileInput.files[i]);
+            imageUrls.push(url);
+        }
+      } catch (e) {
+        alert("照片上傳失敗！原因：" + e.message);
+        btn.disabled = false;
+        btn.innerText = '儲存';
+        return;
+      }
+    }
+
+    const bName = this.getBrandName(this.currentDetailPlace.name);
+    
+    if (!this.brandDatabase[bName].overall) {
+      this.brandDatabase[bName].overall = [];
+    }
+    
+    this.brandDatabase[bName].overall.unshift({
+      title: title,
+      content: content,
+      imageUrls: imageUrls
+    });
+    
+    this.ensureInList();
+    this.saveData();
+    this.renderDetailData(bName);
+    this.closeModal();
+  },
+
+  // 🌟 編輯總評價送出：合併原本保留的圖 ＋ 新上傳的圖
+  async submitOverallEdit(index) {
+    const title = document.getElementById('overall-form-title').value.trim();
+    if (!title) return alert("請輸入標題！");
+
+    const btn = document.getElementById('save-overall-edit-btn');
+    btn.disabled = true;
+    btn.innerText = '上傳與儲存中...';
+
+    const content = document.getElementById('overall-form-content').value.trim();
+    const bName = this.getBrandName(this.currentDetailPlace.name);
+    
+    // 基礎名單：編輯視窗裡刪除剩下的圖片
+    let imageUrls = [...this.tempOverallImages]; 
+
+    const fileInput = document.getElementById('overall-form-image');
+    if (fileInput.files.length > 0) {
+      try {
+        for(let i = 0; i < fileInput.files.length; i++) {
+           let url = await this.uploadImageFile(fileInput.files[i]);
+           imageUrls.push(url);
+        }
+      } catch (e) {
+        alert("照片上傳失敗！原因：" + e.message);
+        btn.disabled = false;
+        btn.innerText = '儲存';
+        return;
+      }
+    }
+    
+    this.brandDatabase[bName].overall[index] = {
+      title: title,
+      content: content,
+      imageUrls: imageUrls
     };
     
     this.saveData();
