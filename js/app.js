@@ -1,11 +1,12 @@
 // ==========================================
-// 🌟 Google Apps Script (試算表 API) 網址
+// Google Apps Script (試算表 API) 網址
 // ==========================================
 const GAS_URL = "https://script.google.com/macros/s/AKfycbyeOz9yNccHJoy-CTaAhgMWC6XhpzNgRX4IBm6HGXZsY0p5FMq9zJteSHbAGCAV-60eMA/exec";
 
 const App = {
   map: null,
   placesService: null,
+  infoWindow: null, // 🌟 新增：用來顯示單一餐廳名稱的資訊視窗
   markers: [],
   mapCenter: { lat: 25.0330, lng: 121.5654 }, 
   searchResults: [],
@@ -25,7 +26,6 @@ const App = {
   
   currentDetailPlace: null,
 
-  // 🌟 用來暫存編輯視窗的圖片狀態
   tempMenuImageUrl: null,
   tempOverallImages: [],
 
@@ -60,6 +60,29 @@ const App = {
     }
   },
 
+  checkKeywords(name, keywordStr) {
+    if (!keywordStr) return true;
+    const kws = keywordStr.toLowerCase().trim().split(/\s+/);
+    const targetName = name.toLowerCase();
+    return kws.every(k => targetName.includes(k));
+  },
+
+  // 🌟 修改：點擊定位按鈕時，移動地圖並彈出餐廳名稱
+  panToLocation(lat, lng, name, event) {
+    event.stopPropagation();
+    const loc = { lat, lng };
+    this.map.setCenter(loc);
+    this.map.setZoom(17);
+    
+    // 開啟資訊視窗顯示名稱
+    if (!this.infoWindow) {
+      this.infoWindow = new google.maps.InfoWindow();
+    }
+    this.infoWindow.setContent(`<div style="padding: 4px 8px; font-weight: bold; font-size: 15px; color: #FF7A00;">${name}</div>`);
+    this.infoWindow.setPosition(loc);
+    this.infoWindow.open(this.map);
+  },
+
   updateUserMarker() {
     if (!this.userLocation) return;
     if (!this.userMarker) {
@@ -88,7 +111,7 @@ const App = {
       this.map.setZoom(17);
       this.performSearch(this.userLocation); 
     } else {
-      alert("📍 正在取得定位中，或請確認是否允許瀏覽器存取位置權限。");
+      alert("正在取得定位中，或請確認是否允許瀏覽器存取位置權限。");
     }
   },
 
@@ -149,13 +172,11 @@ const App = {
     }
   },
 
-  // 🌟 已移除自動壓縮功能，改為上傳原檔
   async uploadImageFile(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.readAsDataURL(file);
       reader.onload = async (e) => {
-        // 直接取得 Base64 原檔編碼
         const base64Data = e.target.result.split(',')[1];
         
         try {
@@ -232,9 +253,6 @@ const App = {
       mapTypeControl: false,
     });
     this.placesService = new google.maps.places.PlacesService(this.map);
-    this.map.addListener('dragend', () => {
-      document.getElementById('search-here-btn').style.display = 'block';
-    });
     this.performSearch();
   },
 
@@ -259,6 +277,8 @@ const App = {
   },
 
   performSearch(specificLocation = null, radius = '500', isAdvanced = false) {
+    if (this.infoWindow) this.infoWindow.close(); // 重新搜尋時關閉對話框
+
     const rawKeyword = document.getElementById('search-input').value.trim();
     const searchKeyword = rawKeyword || (isAdvanced ? rawKeyword : '餐廳|美食|小吃|晚餐|飲食');
     const loc = specificLocation || this.mapCenter;
@@ -271,7 +291,7 @@ const App = {
       
       if (status === google.maps.places.PlacesServiceStatus.OK && results) {
         if (isAdvanced && this.lastKeyword) {
-          finalResults = results.filter(p => p.name.toLowerCase().includes(this.lastKeyword));
+          finalResults = results.filter(p => this.checkKeywords(p.name, this.lastKeyword));
         } else {
           finalResults = [...results];
         }
@@ -281,7 +301,7 @@ const App = {
         const addedIds = new Set(finalResults.map(p => p.place_id));
         for (const listName in this.userLists) {
           this.userLists[listName].forEach(place => {
-            if (place.name.toLowerCase().includes(this.lastKeyword) && !addedIds.has(place.place_id)) {
+            if (this.checkKeywords(place.name, this.lastKeyword) && !addedIds.has(place.place_id)) {
               finalResults.push(place);
               addedIds.add(place.place_id);
             }
@@ -290,7 +310,6 @@ const App = {
       }
 
       this.searchResults = finalResults;
-      document.getElementById('search-here-btn').style.display = 'none';
       this.rebuildMarkers();
       this.updateVisibleRestaurants();
       
@@ -301,6 +320,7 @@ const App = {
     });
   },
 
+  // 🌟 還原：未收藏為預設紅點，有收藏的維持白色圓圈配表情符號
   rebuildMarkers() {
     this.markers.forEach(m => m.setMap(null));
     this.markers = [];
@@ -373,6 +393,7 @@ const App = {
         });
         this.markers.push(marker);
       } else {
+        // 預設紅點
         const marker = new google.maps.Marker({
           map: this.map, 
           position: place.geometry.location, 
@@ -398,22 +419,21 @@ const App = {
       return true;
     });
     
+    const baseLocation = this.userLocation || this.lastSearchLocation;
+
     filtered.forEach(p => {
       p._saved = this.isInAnyList(p);
-      p._distance = this.getDistance(this.lastSearchLocation, p.geometry.location);
-      p._nameMatch = kw ? p.name.toLowerCase().includes(kw) : false;
+      p._distance = this.getDistance(baseLocation, p.geometry.location);
+      p._nameMatch = kw ? this.checkKeywords(p.name, kw) : false;
     });
 
     filtered.sort((a, b) => {
       const aMatchSaved = a._nameMatch && a._saved;
       const bMatchSaved = b._nameMatch && b._saved;
-      
       if (aMatchSaved && !bMatchSaved) return -1;
       if (!aMatchSaved && bMatchSaved) return 1;
-      
       if (a._saved && !b._saved) return -1; 
       if (!a._saved && b._saved) return 1;  
-      
       return a._distance - b._distance;     
     });
 
@@ -426,16 +446,56 @@ const App = {
     this.visibleResults.forEach(place => {
       const div = document.createElement('div');
       div.className = 'restaurant-card';
+      
+      const ratingNum = place.rating ? place.rating.toFixed(1) : '無';
+      const reviewCount = place.user_ratings_total ? `(${place.user_ratings_total}則評論)` : '';
+      const star = place.rating ? `<span style="color:#FFB800;">★</span>` : '';
+      
+      const distanceText = place._distance ? `<span style="color:var(--primary); font-weight:bold; margin-left:8px;">${place._distance.toFixed(1)} km</span>` : '';
+      
+      const lat = this.getLat(place.geometry.location);
+      const lng = this.getLng(place.geometry.location);
+      
+      // 🌟 這裡改成：動態抓取該餐廳所屬的所有清單名稱，並製作成標籤
+      let savedBadges = '';
+      if (place._saved) {
+        const bName = this.getBrandName(place.name);
+        for (const listName in this.userLists) {
+          if (this.userLists[listName].some(p => this.getBrandName(p.name) === bName)) {
+            const emoji = this.listEmojis[listName] || '🔖';
+            // 使用淺橘色底色配上橘色文字，讓清單標籤更好看
+            savedBadges += `<span style="font-size:11px; background:#FFF0E5; color:#FF7A00; border:1px solid #FFE4D6; padding:2px 6px; border-radius:10px; margin-left:6px; white-space:nowrap; display:inline-block; margin-top:2px;">${emoji} ${listName}</span>`;
+          }
+        }
+      }
+
+      const safeName = place.name.replace(/'/g, "\\'").replace(/"/g, '"');
+
       div.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-          <div style="flex:1; padding-right:10px;">
-            <strong style="font-size:16px;">${place.name}</strong> 
-            ${place._saved ? '<span title="已存入清單" style="font-size:13px; margin-left:4px;">🔖</span>' : ''}<br>
-            <small style="color:gray;">${place.vicinity || ''}</small>
+        <div style="display:flex; align-items:center; width: 100%; gap: 12px;">
+          <div style="color:#FF7A00; flex-shrink:0;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M11 2v9a3 3 0 0 1-3 3v8H6v-8a3 3 0 0 1-3-3V2h2v5h1V2h2v5h1V2h2zm8 0h-2v8a3 3 0 0 0-3 3v9h2v-9a1 1 0 0 1 1-1h2V2z"/>
+            </svg>
           </div>
-          <div style="text-align:right; min-width:60px;">
-            <div>⭐️ ${place.rating || 'N/A'}</div>
-            <small style="color:var(--primary); font-weight:bold;">${place._distance.toFixed(1)} km</small>
+          
+          <div style="flex:1; padding-right:10px;">
+            <strong style="font-size:16px; margin-bottom: 4px; display: flex; align-items:center; flex-wrap:wrap; color:#111;">
+              ${place.name} ${savedBadges}
+            </strong>
+            <div style="color:#666; font-size:13px; display:flex; align-items:center;">
+              評分: ${star} ${ratingNum} ${reviewCount} ${distanceText}
+            </div>
+          </div>
+
+          <div style="text-align:right; flex-shrink:0; cursor:pointer; padding: 10px;" onclick="App.panToLocation(${lat}, ${lng}, '${safeName}', event)" title="定位到此餐廳">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#00A0FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="6"></circle>
+              <line x1="12" y1="2" x2="12" y2="6"></line>
+              <line x1="12" y1="18" x2="12" y2="22"></line>
+              <line x1="4" y1="12" x2="2" y2="12"></line>
+              <line x1="22" y1="12" x2="18" y2="12"></line>
+            </svg>
           </div>
         </div>
       `;
@@ -456,9 +516,7 @@ const App = {
     Object.keys(this.userLists).forEach(listName => {
       const isChecked = this.activeListFilters.has(listName) ? 'checked' : '';
       const emoji = this.listEmojis[listName] || '🔖';
-      
       const uniqueBrands = new Set(this.userLists[listName].map(p => this.getBrandName(p.name)));
-      
       html += `
         <label style="display:block; margin:15px 0; font-size:16px; cursor:pointer;">
           <input type="checkbox" ${isChecked} onchange="App.toggleFilter('${listName}', this.checked)" style="transform: scale(1.2); margin-right:10px;"> 
@@ -493,14 +551,12 @@ const App = {
     }
     
     document.getElementById('detail-title').innerText = place.name;
-    
     document.getElementById('detail-brand').innerHTML = `
-      📂 品牌：${bName}
-      <button onclick="App.showBrandRenameModal()" style="font-size:12px; padding:4px 8px; border-radius:12px; border:1px solid #FF7A00; background:white; color:#FF7A00; cursor:pointer;">✏️ 修改</button>
+      品牌：${bName}
+      <button onclick="App.showBrandRenameModal()" style="font-size:12px; padding:4px 8px; border-radius:12px; border:1px solid #FF7A00; background:white; color:#FF7A00; cursor:pointer;">修改</button>
     `;
-    
-    document.getElementById('detail-address').innerText = `📍 ${place.vicinity || '無地址'}`;
-    document.getElementById('detail-rating').innerText = `⭐️ 評分: ${place.rating || 'N/A'}`;
+    document.getElementById('detail-address').innerText = `${place.vicinity || '無地址'}`;
+    document.getElementById('detail-rating').innerText = `評分: ${place.rating || 'N/A'}`;
     
     this.renderDetailData(bName);
     this.updateDetailListBadges(); 
@@ -543,7 +599,6 @@ const App = {
   renderDetailData(bName) {
     const data = this.brandDatabase[bName];
     
-    // 歷史紀錄
     const visitsHtml = data.visits.map((date, idx) => `
       <li style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:1px solid #eee; padding-bottom:6px;">
         <span style="font-size:15px;">${date}</span>
@@ -554,7 +609,6 @@ const App = {
       </li>`).join('');
     document.getElementById('detail-visits').innerHTML = visitsHtml ? `<ul style="padding-left:10px; margin:0; list-style:none;">${visitsHtml}</ul>` : '<p style="color:gray; font-size:14px; margin:0;">尚無紀錄</p>';
     
-    // 餐點評價
     const menuData = data.menu || [];
     const good = menuData.filter(m => m.category === '好吃');
     const normal = menuData.filter(m => m.category === '普通');
@@ -586,7 +640,7 @@ const App = {
                   </div>
                 </div>
                 ${m.content ? `<p style="margin:0; font-size:13px; color:#666;">${m.content}</p>` : ''}
-                ${m.imageUrl ? `<div style="margin-top: 8px;"><button onclick="App.showImageModal('${m.imageUrl}')" style="background:#f0f0f0; border:1px solid #ddd; padding:5px 10px; border-radius:15px; cursor:pointer; font-size:13px;">📷</button></div>` : ''}
+                ${m.imageUrl ? `<div style="margin-top: 8px;"><button onclick="App.showImageModal('${m.imageUrl}')" style="background:#f0f0f0; border:1px solid #ddd; padding:5px 10px; border-radius:15px; cursor:pointer; font-size:13px;">照片</button></div>` : ''}
               </div>
             `;
           }).join('') : `<p style="color:gray; font-size:13px; margin:0;">尚無紀錄</p>`}
@@ -600,12 +654,10 @@ const App = {
 
     document.getElementById('detail-menu').innerHTML = menuHtml;
 
-    // 🌟 總評價 (支援多圖預覽顯示)
     const overallData = data.overall || [];
     const overallHtml = overallData.map((o, idx) => {
       const titleText = o.title || "總評價"; 
       
-      // 處理相容舊版的單圖與新版的多圖
       let urls = o.imageUrls ? o.imageUrls : (o.imageUrl ? [o.imageUrl] : []);
       let imgsHtml = urls.map(url => `
         <img src="${url}" style="width:80px; height:80px; object-fit:cover; border-radius:6px; cursor:pointer; border:1px solid #FFE4D6;" onclick="App.showImageModal('${url}')">
@@ -708,7 +760,7 @@ const App = {
             html += `
             <button class="action-btn" style="width:100%; margin-bottom:10px; background:#F9FAFB; color:#333; border:1px solid #ddd; text-align:left; padding:10px 15px;" 
                     onclick="App.executeGoogleMapsOpenById('${p.place_id}')">
-                📍 ${p.name}
+                🔷 ${p.name}
             </button>`;
         });
         html += `<div class="modal-actions"><button onclick="App.closeModal()" style="background:#eee; color:#333; border:none; padding:10px 18px; border-radius:20px; font-weight:bold; cursor:pointer; width:100%;">取消</button></div>`;
@@ -732,7 +784,7 @@ const App = {
   },
 
   executeGoogleMapsOpen(place) {
-    let url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name)}`;
+    let url = `https://www.google.com/maps/search/?api=1&query=$${encodeURIComponent(place.name)}`;
     if (place.place_id) {
       url += `&query_place_id=${place.place_id}`;
     }
@@ -761,9 +813,9 @@ const App = {
         <div style="flex:1;">
           <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">分類</label>
           <select id="menu-form-category" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px; background:white;">
-            <option value="好吃" ${category === '好吃' ? 'selected' : ''}>😋 好吃</option>
-            <option value="普通" ${category === '普通' ? 'selected' : ''}>😐 普通</option>
-            <option value="難吃" ${category === '難吃' ? 'selected' : ''}>🤮 難吃</option>
+            <option value="好吃" ${category === '好吃' ? 'selected' : ''}>好吃</option>
+            <option value="普通" ${category === '普通' ? 'selected' : ''}>普通</option>
+            <option value="難吃" ${category === '難吃' ? 'selected' : ''}>難吃</option>
           </select>
         </div>
         <div style="flex:1;">
@@ -829,19 +881,16 @@ const App = {
     this.closeModal();
   },
 
-  // 🌟 移除暫存的單一菜單圖片
   removeTempMenuImage() {
     this.tempMenuImageUrl = null;
     document.getElementById('menu-edit-img-container').style.display = 'none';
   },
 
-  // 🌟 移除暫存的總評價多張圖片之一
   removeTempOverallImage(index) {
     this.tempOverallImages.splice(index, 1);
     this.renderTempOverallImages();
   },
 
-  // 🌟 渲染總評價編輯時的預覽圖片列
   renderTempOverallImages() {
     const container = document.getElementById('overall-edit-imgs');
     if(!container) return;
@@ -872,7 +921,6 @@ const App = {
       }
     } 
     else if (type === 'menu') {
-      // 🌟 編輯餐點：支援刪除單一圖片
       this.tempMenuImageUrl = item.imageUrl || null;
       const ratingValue = (item.rating === null || item.rating === undefined) ? '' : item.rating;
       
@@ -887,7 +935,7 @@ const App = {
             <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">分類</label>
             <input type="hidden" id="menu-form-category" value="${item.category}">
             <div style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #eee; border-radius:6px; font-size:15px; background:#f9f9f9; color:#666;">
-              ${item.category === '好吃' ? '😋 好吃' : item.category === '普通' ? '😐 普通' : '🤮 難吃'}
+              ${item.category === '好吃' ? '好吃' : item.category === '普通' ? '普通' : '難吃'}
             </div>
           </div>
           <div style="flex:1;">
@@ -902,7 +950,7 @@ const App = {
         <div style="margin-bottom: 15px; text-align: left;">
           <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">目前照片</label>
           <div id="menu-edit-img-container" style="${this.tempMenuImageUrl ? 'display:flex;' : 'display:none;'} gap:10px; align-items:center; margin-bottom:10px;">
-             <button onclick="App.showImageModal(App.tempMenuImageUrl)" style="background:#f0f0f0; border:1px solid #ddd; padding:5px 10px; border-radius:15px; cursor:pointer; font-size:13px;">📷</button>
+             <button onclick="App.showImageModal(App.tempMenuImageUrl)" style="background:#f0f0f0; border:1px solid #ddd; padding:5px 10px; border-radius:15px; cursor:pointer; font-size:13px;">照片</button>
              <button onclick="App.removeTempMenuImage()" style="background:#FFEbee; color:#F44336; border:1px solid #FFCDD2; padding:5px 10px; border-radius:15px; cursor:pointer; font-size:13px;">刪除</button>
           </div>
           <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">上傳新照片 (會覆蓋目前照片)</label>
@@ -916,7 +964,6 @@ const App = {
       this.openModal(html);
     } 
     else if (type === 'overall') {
-      // 🌟 編輯總評價：支援多圖刪除、新增
       this.tempOverallImages = item.imageUrls ? [...item.imageUrls] : (item.imageUrl ? [item.imageUrl] : []);
       
       const html = `
@@ -943,7 +990,6 @@ const App = {
       `;
       this.openModal(html);
       
-      // 等待 DOM 繪製後立刻渲染目前多圖
       setTimeout(() => this.renderTempOverallImages(), 50);
     }
   },
@@ -963,11 +1009,9 @@ const App = {
 
     const bName = this.getBrandName(this.currentDetailPlace.name);
     
-    // 如果有在編輯視窗中按下「刪除」，this.tempMenuImageUrl 會變成 null
     let imageUrl = this.tempMenuImageUrl; 
     
     const fileInput = document.getElementById('menu-form-image');
-    // 如果有上傳新檔案，直接覆蓋舊的/空的
     if (fileInput.files.length > 0) {
       try {
         imageUrl = await this.uploadImageFile(fileInput.files[0]);
@@ -992,7 +1036,6 @@ const App = {
     this.closeModal();
   },
 
-  // 🌟 總評價：新增時支援多檔案上傳
   addOverallReview() {
     const html = `
       <h3 style="margin-top:0">新增總評價</h3>
@@ -1029,7 +1072,6 @@ const App = {
     let imageUrls = [];
     const fileInput = document.getElementById('overall-form-image');
     
-    // 多張圖片逐一上傳
     if (fileInput.files.length > 0) {
       try {
         for (let i = 0; i < fileInput.files.length; i++) {
@@ -1062,7 +1104,6 @@ const App = {
     this.closeModal();
   },
 
-  // 🌟 編輯總評價送出：合併原本保留的圖 ＋ 新上傳的圖
   async submitOverallEdit(index) {
     const title = document.getElementById('overall-form-title').value.trim();
     if (!title) return alert("請輸入標題！");
@@ -1074,7 +1115,6 @@ const App = {
     const content = document.getElementById('overall-form-content').value.trim();
     const bName = this.getBrandName(this.currentDetailPlace.name);
     
-    // 基礎名單：編輯視窗裡刪除剩下的圖片
     let imageUrls = [...this.tempOverallImages]; 
 
     const fileInput = document.getElementById('overall-form-image');
@@ -1372,7 +1412,7 @@ const App = {
               displayName = bName.replace(regex, `<span style="background-color:#FFD54F;">$1</span>`);
           }
           
-          nameSpan.innerHTML = `📍 ${displayName}`; 
+          nameSpan.innerHTML = `🔷${displayName}`; 
           nameSpan.style.cssText = 'color:var(--primary); font-weight:bold; font-size:16px; cursor:pointer; text-decoration:underline; flex:1;';
           nameSpan.onclick = () => {
             if (this.map && r.geometry && r.geometry.location) {

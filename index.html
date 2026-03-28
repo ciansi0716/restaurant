@@ -52,13 +52,9 @@
       justify-content: center;
       align-items: center;
       cursor: pointer;
-    }
-    .sheet-handle::before {
-      content: "";
-      width: 40px;
-      height: 5px;
-      background-color: #ccc;
-      border-radius: 3px;
+      border: none !important;
+      background: transparent !important;
+      box-shadow: none !important;
     }
   </style>
 </head>
@@ -85,25 +81,33 @@
     <div class="main-content">
       <div id="map-container">
         <div id="map" style="width: 100%; height: 100%; background-color: #e0e0e0;"></div>
-        <button id="search-here-btn" class="overlay-btn" style="display:none; top: 10px;" onclick="App.searchInCurrentArea()">
-          🔄搜尋這個區域
-        </button>
-        <button class="overlay-btn filter-btn" style="top: 10px;" onclick="App.showFilterLayerModal()">
+
+        <button class="overlay-btn filter-btn" style="top: 20px;" onclick="App.showFilterLayerModal()">
           圖層
         </button>
-        <button class="overlay-btn locate-btn" style="top: 65px; bottom: auto; right: 20px; width: 44px; height: 44px; padding: 0; justify-content: center;" onclick="App.centerToUserLocation()" title="回到我的位置">
-          📍
+        <button class="overlay-btn locate-btn" style="top: 140px; bottom: auto; right: 20px; width: 44px; height: 44px; padding: 0; justify-content: center; z-index: 1000;" onclick="App.centerToUserLocation()" title="回到我的位置">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#00A0FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="6"></circle>
+            <line x1="12" y1="2" x2="12" y2="6"></line>
+            <line x1="12" y1="18" x2="12" y2="22"></line>
+            <line x1="4" y1="12" x2="2" y2="12"></line>
+            <line x1="22" y1="12" x2="18" y2="12"></line>
+          </svg>
         </button>
       </div>
 
       <div id="list-container" class="collapsed">
-        <div class="sheet-handle" onclick="App.toggleBottomSheet()"></div>
-        <div class="list-header" style="flex-shrink: 0; cursor:pointer; padding-top: 0;" onclick="App.toggleBottomSheet()">
-          <span id="result-count">搜尋中...</span>
-          <label style="display:flex; align-items:center; gap:5px; cursor:pointer; font-weight:normal;" onclick="event.stopPropagation();">
-            <input type="checkbox" id="open-now-toggle" onchange="App.updateVisibleRestaurants()"> 僅顯示營業中
+        <div class="sheet-handle" onclick="App.toggleBottomSheet()">
+          <div style="width: 40px; height: 5px; background-color: #ccc; border-radius: 3px;"></div>
+        </div>
+        
+        <div class="list-header" style="flex-shrink: 0; cursor:pointer; padding: 15px 20px; display:flex; justify-content:space-between; align-items:center; font-weight:bold; font-size:15px; border-bottom:1px solid #f0f0f0;" onclick="App.toggleBottomSheet()">
+          <span id="result-count" style="color: #FF7A00;">搜尋中...</span>
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:bold; color: #FF7A00;" onclick="event.stopPropagation();">
+            僅顯示營業中 <input type="checkbox" id="open-now-toggle" onchange="App.updateVisibleRestaurants()" class="toggle-switch">
           </label>
         </div>
+
         <div class="scrollable-list" id="search-results-list" style="flex: 1; overflow-y: auto; padding-bottom: 20px;">
         </div>
       </div>
@@ -112,7 +116,9 @@
 
   <div id="view-detail" class="view-container">
     <div class="page-header">
-      <button onclick="App.navigate('home')">⬅️</button>
+      <button onclick="App.navigate('home')">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
       <h2 id="detail-title">餐廳名稱</h2>
       <button onclick="App.showAddToListModal()" title="加入清單" style="width: auto; padding: 4px 12px; border-radius: 20px; font-weight: bold; display: flex; align-items: center; gap: 5px; font-size: 14px; border: 1px solid var(--primary); color: var(--primary); background: white;">
         加入清單
@@ -123,16 +129,16 @@
       <div class="info-card">
         <h3 id="detail-brand" style="display:flex; justify-content:space-between; align-items:center;">
           品牌名稱
-          <button onclick="App.showBrandRenameModal()" style="font-size:12px; padding:4px 8px; border-radius:12px; border:1px solid #FF7A00; background:white; color:#FF7A00; cursor:pointer;">✏️ 修改</button>
+          <button onclick="App.showBrandRenameModal()" style="font-size:12px; padding:4px 8px; border-radius:12px; border:1px solid #FF7A00; background:white; color:#FF7A00; cursor:pointer;">修改</button>
         </h3>
         <p id="detail-address">地址</p>
-        <p id="detail-rating">⭐️評分</p>
+        <p id="detail-rating">評分</p>
         <div id="detail-lists-badges" style="margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px;"></div>
       </div>
 
       <div style="display:flex; gap:10px; margin-bottom: 20px;">
-        <button class="action-btn btn-primary" onclick="App.addVisitDate()" style="margin-top:0; flex:1;">📅新增到訪日</button>
-        <button class="action-btn" onclick="App.openInGoogleMaps()" style="margin-top:0; flex:1; background-color: #4285F4; border-color: #4285F4; color: white;">🗺️ Google 地圖</button>
+        <button class="action-btn btn-primary" onclick="App.addVisitDate()" style="margin-top:0; flex:1;">新增到訪日</button>
+        <button class="action-btn" onclick="App.openInGoogleMaps()" style="margin-top:0; flex:1; background-color: #4285F4; border-color: #4285F4; color: white;">Google 地圖</button>
       </div>
 
       <div class="section">
@@ -157,19 +163,21 @@
 
   <div id="view-lists" class="view-container">
     <div class="page-header">
-      <button onclick="App.navigate('home')">⬅️</button>
+      <button onclick="App.navigate('home')">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
       <h2>我的美食清單</h2>
     </div>
     
     <div style="padding: 10px 15px; background: white; border-bottom: 1px solid #eee; position: sticky; top: 0; z-index: 10;">
-      <input type="text" id="list-search-input" placeholder="🔍 搜尋清單或餐廳名稱..." onkeyup="App.renderLists()" style="width: 100%; padding: 10px 15px; border-radius: 20px; border: 1px solid #ddd; font-size: 15px; box-sizing: border-box; background: #F9FAFB;">
+      <input type="text" id="list-search-input" placeholder="搜尋清單或餐廳名稱..." onkeyup="App.renderLists()" style="width: 100%; padding: 10px 15px; border-radius: 20px; border: 1px solid #ddd; font-size: 15px; box-sizing: border-box; background: #F9FAFB;">
     </div>
 
     <div class="scrollable-content" id="my-lists-container" style="padding-bottom: 80px;">
       </div>
 
     <button class="fab" onclick="App.showCreateListModal()">
-      ➕ 新增清單
+      新增清單
     </button>
   </div>
 
