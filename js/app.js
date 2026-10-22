@@ -6,7 +6,7 @@ const GAS_URL = "https://script.google.com/macros/s/AKfycbyeOz9yNccHJoy-CTaAhgMW
 const App = {
   map: null,
   placesService: null,
-  infoWindow: null, // 🌟 新增：用來顯示單一餐廳名稱的資訊視窗
+  infoWindow: null, 
   markers: [],
   mapCenter: { lat: 25.0330, lng: 121.5654 }, 
   searchResults: [],
@@ -19,15 +19,21 @@ const App = {
   
   userLists: { '未分類': [] },
   listEmojis: { '未分類': '🔖' },
+  listOrder: [], 
   brandDatabase: {},
   brandMappings: {},
   activeListFilters: new Set(),
   expandedLists: new Set(), 
   
   currentDetailPlace: null,
-
   tempMenuImageUrl: null,
   tempOverallImages: [],
+
+  // 🌟 控制面板循環狀態: 0=中間(50%), 1=滿版(100%), 2=中間(50%), 3=最下方(60px)
+  sheetStateIndex: 0,
+  
+  // 🌟 控制清單是否正在「排序模式」
+  isSortingLists: false,
 
   async init() {
     console.log("🚀 系統初始化中...");
@@ -60,6 +66,32 @@ const App = {
     }
   },
 
+  // 🌟 點擊切換清單高度 (循環：中間 -> 滿版 -> 中間 -> 縮到底)
+  handleSheetClick(event) {
+    if (event && (event.target.closest('label') || event.target.tagName.toLowerCase() === 'input' || event.target.closest('button'))) {
+      return;
+    }
+    this.sheetStateIndex = (this.sheetStateIndex + 1) % 4;
+    this.applySheetState();
+  },
+
+  // 🌟 應用當前狀態高度
+  applySheetState() {
+    const sheet = document.getElementById('list-container');
+    if (!sheet) return;
+    
+    const states = ['50%', '100%', '50%', '60px'];
+    const targetState = states[this.sheetStateIndex];
+    
+    if (targetState === '60px') {
+      sheet.classList.add('collapsed');
+      sheet.style.height = '60px';
+    } else {
+      sheet.classList.remove('collapsed');
+      sheet.style.height = targetState;
+    }
+  },
+
   checkKeywords(name, keywordStr) {
     if (!keywordStr) return true;
     const kws = keywordStr.toLowerCase().trim().split(/\s+/);
@@ -67,14 +99,12 @@ const App = {
     return kws.every(k => targetName.includes(k));
   },
 
-  // 🌟 修改：點擊定位按鈕時，移動地圖並彈出餐廳名稱
   panToLocation(lat, lng, name, event) {
     event.stopPropagation();
     const loc = { lat, lng };
     this.map.setCenter(loc);
     this.map.setZoom(17);
     
-    // 開啟資訊視窗顯示名稱
     if (!this.infoWindow) {
       this.infoWindow = new google.maps.InfoWindow();
     }
@@ -126,6 +156,7 @@ const App = {
         this.listEmojis = data.listEmojis || {}; 
         this.brandDatabase = data.brandDatabase || {};
         this.brandMappings = data.brandMappings || {};
+        this.listOrder = data.listOrder || [];
         console.log("✅ 成功從試算表載入資料！");
       }
     } catch (e) {
@@ -137,16 +168,22 @@ const App = {
         this.listEmojis = data.listEmojis || {};
         this.brandDatabase = data.brandDatabase || {};
         this.brandMappings = data.brandMappings || {};
+        this.listOrder = data.listOrder || [];
       }
     }
 
-    if (!this.listEmojis['未分類']) {
-      this.listEmojis['未分類'] = '🔖';
-    }
+    if (!this.listEmojis['未分類']) this.listEmojis['未分類'] = '🔖';
     for (let listName in this.userLists) {
-      if (!this.listEmojis[listName]) {
-        this.listEmojis[listName] = '🔖'; 
-      }
+      if (!this.listEmojis[listName]) this.listEmojis[listName] = '🔖'; 
+    }
+
+    if (!this.listOrder || this.listOrder.length === 0) {
+      this.listOrder = Object.keys(this.userLists);
+    } else {
+      Object.keys(this.userLists).forEach(k => {
+          if (!this.listOrder.includes(k)) this.listOrder.push(k);
+      });
+      this.listOrder = this.listOrder.filter(k => this.userLists[k]);
     }
   },
 
@@ -155,7 +192,8 @@ const App = {
       userLists: this.userLists,
       listEmojis: this.listEmojis,
       brandDatabase: this.brandDatabase,
-      brandMappings: this.brandMappings
+      brandMappings: this.brandMappings,
+      listOrder: this.listOrder 
     };
     
     try { localStorage.setItem('foodMapData', JSON.stringify(data)); } catch(e){}
@@ -178,7 +216,6 @@ const App = {
       reader.readAsDataURL(file);
       reader.onload = async (e) => {
         const base64Data = e.target.result.split(',')[1];
-        
         try {
           const res = await fetch(GAS_URL, {
             method: 'POST',
@@ -194,12 +231,8 @@ const App = {
             })
           });
           const result = await res.json();
-          
-          if (result.error) {
-            reject(new Error("後端錯誤: " + result.error));
-          } else {
-            resolve(result.url);
-          }
+          if (result.error) reject(new Error("後端錯誤: " + result.error));
+          else resolve(result.url);
         } catch(error) {
           reject(error);
         }
@@ -227,7 +260,6 @@ const App = {
     const lon1 = this.getLng(loc1);
     const lat2 = this.getLat(loc2);
     const lon2 = this.getLng(loc2);
-    
     const R = 6371; 
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
@@ -251,16 +283,10 @@ const App = {
       center: this.mapCenter,
       zoom: 15,
       mapTypeControl: false,
+      gestureHandling: 'greedy', 
     });
     this.placesService = new google.maps.places.PlacesService(this.map);
     this.performSearch();
-  },
-
-  toggleBottomSheet() {
-    const sheet = document.getElementById('list-container');
-    if (sheet) {
-      sheet.classList.toggle('collapsed');
-    }
   },
 
   searchInCurrentArea() {
@@ -277,7 +303,7 @@ const App = {
   },
 
   performSearch(specificLocation = null, radius = '500', isAdvanced = false) {
-    if (this.infoWindow) this.infoWindow.close(); // 重新搜尋時關閉對話框
+    if (this.infoWindow) this.infoWindow.close(); 
 
     const rawKeyword = document.getElementById('search-input').value.trim();
     const searchKeyword = rawKeyword || (isAdvanced ? rawKeyword : '餐廳|美食|小吃|晚餐|飲食');
@@ -288,7 +314,6 @@ const App = {
     
     this.placesService.nearbySearch({ location: loc, radius: radius, keyword: searchKeyword }, (results, status) => {
       let finalResults = [];
-      
       if (status === google.maps.places.PlacesServiceStatus.OK && results) {
         if (isAdvanced && this.lastKeyword) {
           finalResults = results.filter(p => this.checkKeywords(p.name, this.lastKeyword));
@@ -313,14 +338,12 @@ const App = {
       this.rebuildMarkers();
       this.updateVisibleRestaurants();
       
-      const sheet = document.getElementById('list-container');
-      if (sheet) {
-        sheet.classList.remove('collapsed');
-      }
+      // 搜尋後永遠重置回到中間 (Index = 0)
+      this.sheetStateIndex = 0;
+      this.applySheetState();
     });
   },
 
-  // 🌟 還原：未收藏為預設紅點，有收藏的維持白色圓圈配表情符號
   rebuildMarkers() {
     this.markers.forEach(m => m.setMap(null));
     this.markers = [];
@@ -336,21 +359,10 @@ const App = {
              map: this.map, 
              position: place.geometry.location, 
              title: `[${listName}] ${place.name}`,
-             icon: {
-               path: google.maps.SymbolPath.CIRCLE,
-               scale: 14, 
-               fillColor: '#FFFFFF', 
-               fillOpacity: 1, 
-               strokeWeight: 2, 
-               strokeColor: '#FF7A00' 
-             },
-             label: { 
-               text: this.listEmojis[listName] || '🔖', 
-               fontSize: '16px' 
-             }, 
+             icon: { path: google.maps.SymbolPath.CIRCLE, scale: 14, fillColor: '#FFFFFF', fillOpacity: 1, strokeWeight: 2, strokeColor: '#FF7A00' },
+             label: { text: this.listEmojis[listName] || '🔖', fontSize: '16px' }, 
              zIndex: 1000 
            });
-           
            marker.addListener('click', () => {
              this.map.setCenter(place.geometry.location);
              this.map.setZoom(17);
@@ -364,7 +376,6 @@ const App = {
 
     this.searchResults.forEach(place => {
       if (addedPlaceIds.has(place.place_id)) return;
-      
       const bName = this.getBrandName(place.name);
       let activeEmoji = null;
       let activeListName = null;
@@ -393,7 +404,6 @@ const App = {
         });
         this.markers.push(marker);
       } else {
-        // 預設紅點
         const marker = new google.maps.Marker({
           map: this.map, 
           position: place.geometry.location, 
@@ -420,7 +430,6 @@ const App = {
     });
     
     const baseLocation = this.userLocation || this.lastSearchLocation;
-
     filtered.forEach(p => {
       p._saved = this.isInAnyList(p);
       p._distance = this.getDistance(baseLocation, p.geometry.location);
@@ -446,31 +455,24 @@ const App = {
     this.visibleResults.forEach(place => {
       const div = document.createElement('div');
       div.className = 'restaurant-card';
-      
       const ratingNum = place.rating ? place.rating.toFixed(1) : '無';
       const reviewCount = place.user_ratings_total ? `(${place.user_ratings_total}則評論)` : '';
       const star = place.rating ? `<span style="color:#FFB800;">★</span>` : '';
-      
       const distanceText = place._distance ? `<span style="color:var(--primary); font-weight:bold; margin-left:8px;">${place._distance.toFixed(1)} km</span>` : '';
-      
       const lat = this.getLat(place.geometry.location);
       const lng = this.getLng(place.geometry.location);
       
-      // 🌟 這裡改成：動態抓取該餐廳所屬的所有清單名稱，並製作成標籤
       let savedBadges = '';
       if (place._saved) {
         const bName = this.getBrandName(place.name);
         for (const listName in this.userLists) {
           if (this.userLists[listName].some(p => this.getBrandName(p.name) === bName)) {
             const emoji = this.listEmojis[listName] || '🔖';
-            // 使用淺橘色底色配上橘色文字，讓清單標籤更好看
             savedBadges += `<span style="font-size:11px; background:#FFF0E5; color:#FF7A00; border:1px solid #FFE4D6; padding:2px 6px; border-radius:10px; margin-left:6px; white-space:nowrap; display:inline-block; margin-top:2px;">${emoji} ${listName}</span>`;
           }
         }
       }
-
       const safeName = place.name.replace(/'/g, "\\'").replace(/"/g, '"');
-
       div.innerHTML = `
         <div style="display:flex; align-items:center; width: 100%; gap: 12px;">
           <div style="color:#FF7A00; flex-shrink:0;">
@@ -478,7 +480,6 @@ const App = {
               <path d="M11 2v9a3 3 0 0 1-3 3v8H6v-8a3 3 0 0 1-3-3V2h2v5h1V2h2v5h1V2h2zm8 0h-2v8a3 3 0 0 0-3 3v9h2v-9a1 1 0 0 1 1-1h2V2z"/>
             </svg>
           </div>
-          
           <div style="flex:1; padding-right:10px;">
             <strong style="font-size:16px; margin-bottom: 4px; display: flex; align-items:center; flex-wrap:wrap; color:#111;">
               ${place.name} ${savedBadges}
@@ -487,7 +488,6 @@ const App = {
               評分: ${star} ${ratingNum} ${reviewCount} ${distanceText}
             </div>
           </div>
-
           <div style="text-align:right; flex-shrink:0; cursor:pointer; padding: 10px;" onclick="App.panToLocation(${lat}, ${lng}, '${safeName}', event)" title="定位到此餐廳">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#00A0FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="6"></circle>
@@ -499,20 +499,39 @@ const App = {
           </div>
         </div>
       `;
-      
       div.onclick = () => { 
         this.map.setCenter(place.geometry.location); 
         this.map.setZoom(17); 
         this.openDetail(place); 
       };
-      
       listContainer.appendChild(div);
     });
   },
 
+  setAllFilters(check) {
+    if (check) {
+        Object.keys(this.userLists).forEach(listName => this.activeListFilters.add(listName));
+    } else {
+        this.activeListFilters.clear();
+    }
+    this.showFilterLayerModal(); 
+  },
+
   showFilterLayerModal() {
-    let html = `<h3 style="margin-top:0">在地圖顯示清單圖層</h3>
-                <p style="font-size:13px; color:gray; margin-top:-5px;">打勾後，這些餐廳的標記會一直顯示在地圖上。</p>`;
+    let html = `
+      <div class="modal-sticky-header">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 style="margin:0;">在地圖顯示清單圖層</h3>
+          <button onclick="App.closeModal()" style="background:none; border:none; font-size:24px; cursor:pointer; color:#999; padding:0; line-height:1;">✕</button>
+        </div>
+        <p style="font-size:13px; color:gray; margin-top:5px; margin-bottom:10px;">打勾後，這些餐廳的標記會一直顯示在地圖上。</p>
+        <div style="display:flex; gap:10px;">
+          <button onclick="App.setAllFilters(true)" style="flex:1; padding:8px; border-radius:8px; border:1px solid var(--primary); background:white; color:var(--primary); font-weight:bold; cursor:pointer;">全部勾選</button>
+          <button onclick="App.setAllFilters(false)" style="flex:1; padding:8px; border-radius:8px; border:1px solid #999; background:white; color:#555; font-weight:bold; cursor:pointer;">全部取消</button>
+        </div>
+      </div>
+      <div class="modal-content-scroll">`;
+                
     Object.keys(this.userLists).forEach(listName => {
       const isChecked = this.activeListFilters.has(listName) ? 'checked' : '';
       const emoji = this.listEmojis[listName] || '🔖';
@@ -523,16 +542,14 @@ const App = {
           ${emoji} ${listName} (${uniqueBrands.size})
         </label>`;
     });
-    html += `<div class="modal-actions"><button class="btn-primary" onclick="App.closeModal(); App.rebuildMarkers();">確定</button></div>`;
+    
+    html += `<div class="modal-actions"><button class="btn-primary" onclick="App.closeModal(); App.rebuildMarkers();" style="width:100%;">確定</button></div></div>`;
     this.openModal(html);
   },
 
   toggleFilter(listName, isChecked) {
-    if (isChecked) {
-      this.activeListFilters.add(listName);
-    } else {
-      this.activeListFilters.delete(listName);
-    }
+    if (isChecked) this.activeListFilters.add(listName);
+    else this.activeListFilters.delete(listName);
   },
 
   getBrandName(fullName) {
@@ -543,12 +560,8 @@ const App = {
   openDetail(place) {
     this.currentDetailPlace = place;
     const bName = this.getBrandName(place.name);
-    
-    if (!this.brandDatabase[bName]) {
-      this.brandDatabase[bName] = { visits: [], menu: [], overall: [], notes: [] };
-    } else {
-      if (!this.brandDatabase[bName].overall) this.brandDatabase[bName].overall = [];
-    }
+    if (!this.brandDatabase[bName]) this.brandDatabase[bName] = { visits: [], menu: [], overall: [], notes: [] };
+    else if (!this.brandDatabase[bName].overall) this.brandDatabase[bName].overall = [];
     
     document.getElementById('detail-title').innerText = place.name;
     document.getElementById('detail-brand').innerHTML = `
@@ -577,20 +590,20 @@ const App = {
         badgesHtml += `<span style="background: #FFF0E5; color: #FF7A00; padding: 4px 10px; border-radius: 12px; font-size: 13px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px;">${emoji} ${listName}</span>`;
       }
     }
-
-    if (badgesHtml === '') {
-       badgesHtml = `<span style="color: gray; font-size: 13px;">尚未加入任何清單</span>`;
-    }
+    if (badgesHtml === '') badgesHtml = `<span style="color: gray; font-size: 13px;">尚未加入任何清單</span>`;
     container.innerHTML = badgesHtml;
   },
 
   showImageModal(imageUrl) {
     const html = `
-      <div style="text-align:center;">
-        <img src="${imageUrl}" style="max-width:100%; max-height:70vh; border-radius:8px; object-fit:contain;">
+      <div class="modal-sticky-header">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 style="margin:0;">查看照片</h3>
+          <button onclick="App.closeModal()" style="background:none; border:none; font-size:24px; cursor:pointer; color:#999; padding:0; line-height:1;">✕</button>
+        </div>
       </div>
-      <div class="modal-actions">
-        <button class="btn-primary" onclick="App.closeModal()" style="width:100%;">關閉</button>
+      <div class="modal-content-scroll" style="text-align:center;">
+        <img src="${imageUrl}" style="max-width:100%; max-height:60vh; border-radius:8px; object-fit:contain;">
       </div>
     `;
     this.openModal(html);
@@ -598,7 +611,6 @@ const App = {
 
   renderDetailData(bName) {
     const data = this.brandDatabase[bName];
-    
     const visitsHtml = data.visits.map((date, idx) => `
       <li style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:1px solid #eee; padding-bottom:6px;">
         <span style="font-size:15px;">${date}</span>
@@ -618,22 +630,15 @@ const App = {
       return `
         <div style="margin-top:15px; border-left: 4px solid ${color}; padding-left: 12px; padding-right: 4px;">
           <h4 style="margin:0 0 10px 0; display:flex; align-items:center; justify-content:space-between;">
-            <span style="color:${color}; display:flex; align-items:center; gap:5px; font-size:15px;">
-              ${emoji} ${title} (${arr.length})
-            </span>
-            <button onclick="App.addMenuNote('${title}')" style="background:${color}; color:white; border:none; padding:5px 12px; border-radius:15px; font-weight:bold; font-size:13px; cursor:pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-              + 新增
-            </button>
+            <span style="color:${color}; display:flex; align-items:center; gap:5px; font-size:15px;">${emoji} ${title} (${arr.length})</span>
+            <button onclick="App.addMenuNote('${title}')" style="background:${color}; color:white; border:none; padding:5px 12px; border-radius:15px; font-weight:bold; font-size:13px; cursor:pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">+ 新增</button>
           </h4>
           ${arr.length > 0 ? arr.map(m => {
             const realIdx = menuData.indexOf(m); 
             return `
               <div style="background:#F9FAFB; padding:10px; margin-bottom:8px; border-radius:6px; border:1px solid #EAEBEE;">
                 <div style="display:flex; justify-content:space-between; align-items:center; font-weight:bold; font-size:14px; margin-bottom:4px;">
-                  <span style="color:#333; display:flex; align-items:center;">
-                    ${m.title} 
-                    ${App.getStarString(m.rating)}
-                  </span>
+                  <span style="color:#333; display:flex; align-items:center;">${m.title}${App.getStarString(m.rating)}</span>
                   <div style="display:flex; gap:8px;">
                     <button style="color:#007AFF; border:none; background:none; cursor:pointer; padding:0; font-size:13px;" onclick="App.editData('menu', ${realIdx})">編輯</button>
                     <button style="color:#F44336; border:none; background:none; cursor:pointer; padding:0; font-size:13px;" onclick="App.deleteData('menu', ${realIdx})">刪除</button>
@@ -641,28 +646,21 @@ const App = {
                 </div>
                 ${m.content ? `<p style="margin:0; font-size:13px; color:#666;">${m.content}</p>` : ''}
                 ${m.imageUrl ? `<div style="margin-top: 8px;"><button onclick="App.showImageModal('${m.imageUrl}')" style="background:#f0f0f0; border:1px solid #ddd; padding:5px 10px; border-radius:15px; cursor:pointer; font-size:13px;">照片</button></div>` : ''}
-              </div>
-            `;
+              </div>`;
           }).join('') : `<p style="color:gray; font-size:13px; margin:0;">尚無紀錄</p>`}
         </div>
       `;
     };
-
     let menuHtml = renderMenuCategory(good, '好吃', '', '#4CAF50');
     menuHtml += renderMenuCategory(normal, '普通', '', '#FF9800');
     menuHtml += renderMenuCategory(bad, '難吃', '', '#F44336');
-
     document.getElementById('detail-menu').innerHTML = menuHtml;
 
     const overallData = data.overall || [];
     const overallHtml = overallData.map((o, idx) => {
       const titleText = o.title || "總評價"; 
-      
       let urls = o.imageUrls ? o.imageUrls : (o.imageUrl ? [o.imageUrl] : []);
-      let imgsHtml = urls.map(url => `
-        <img src="${url}" style="width:80px; height:80px; object-fit:cover; border-radius:6px; cursor:pointer; border:1px solid #FFE4D6;" onclick="App.showImageModal('${url}')">
-      `).join('');
-
+      let imgsHtml = urls.map(url => `<img src="${url}" style="width:80px; height:80px; object-fit:cover; border-radius:6px; cursor:pointer; border:1px solid #FFE4D6;" onclick="App.showImageModal('${url}')">`).join('');
       return `
         <div style="background:#FFF9F5; padding:12px; margin-bottom:10px; border-radius:8px; border:1px solid #FFE4D6;">
           <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
@@ -677,14 +675,12 @@ const App = {
         </div>
       `;
     }).join('');
-    
     document.getElementById('detail-overall').innerHTML = overallHtml || '<p style="color:gray; font-size:14px; margin-top:10px;">尚無總評價</p>';
   },
 
   checkAndMoveToUncategorized(place) {
     if (!place) return;
     const bName = this.getBrandName(place.name);
-    
     let isInAnyList = false;
     for (const listName in this.userLists) {
       if (this.userLists[listName].some(p => this.getBrandName(p.name) === bName)) {
@@ -695,19 +691,14 @@ const App = {
     if (isInAnyList) return; 
 
     const data = this.brandDatabase[bName];
-    if (data) {
-      const hasMenu = data.menu && data.menu.length > 0;
-      const hasVisits = data.visits && data.visits.length > 0;
-      const hasOverall = data.overall && data.overall.length > 0;
-      
-      if (hasMenu || hasVisits || hasOverall) {
-        if (!this.userLists['未分類']) {
-          this.userLists['未分類'] = [];
-          this.listEmojis['未分類'] = '🔖';
-        }
-        if (!this.userLists['未分類'].some(p => this.getBrandName(p.name) === bName)) {
-          this.userLists['未分類'].push(place);
-        }
+    if (data && (data.menu?.length > 0 || data.visits?.length > 0 || data.overall?.length > 0)) {
+      if (!this.userLists['未分類']) {
+        this.userLists['未分類'] = [];
+        this.listEmojis['未分類'] = '🔖';
+        if (!this.listOrder.includes('未分類')) this.listOrder.push('未分類');
+      }
+      if (!this.userLists['未分類'].some(p => this.getBrandName(p.name) === bName)) {
+        this.userLists['未分類'].push(place);
       }
     }
   },
@@ -716,7 +707,6 @@ const App = {
     if (!this.currentDetailPlace) return;
     const place = this.currentDetailPlace;
     const bName = this.getBrandName(place.name);
-    
     let isInAnyList = false;
     for (const listName in this.userLists) {
       if (this.userLists[listName].some(p => this.getBrandName(p.name) === bName)) {
@@ -730,6 +720,7 @@ const App = {
       if (!this.userLists['未分類']) {
         this.userLists['未分類'] = [];
         this.listEmojis['未分類'] = '🔖';
+        if (!this.listOrder.includes('未分類')) this.listOrder.push('未分類');
       }
       this.userLists['未分類'].push(place);
     }
@@ -739,31 +730,31 @@ const App = {
     if (!this.currentDetailPlace) return;
     const bName = this.getBrandName(this.currentDetailPlace.name);
     const branches = new Map(); 
-    
     branches.set(this.currentDetailPlace.place_id, this.currentDetailPlace);
 
     for (const listName in this.userLists) {
         this.userLists[listName].forEach(p => {
-            if (this.getBrandName(p.name) === bName) {
-                branches.set(p.place_id, p);
-            }
+            if (this.getBrandName(p.name) === bName) branches.set(p.place_id, p);
         });
     }
 
     const branchList = Array.from(branches.values());
-
     if (branchList.length === 1) {
         this.executeGoogleMapsOpen(branchList[0]);
     } else {
-        let html = `<h3 style="margin-top:0">請選擇要導航的分店：</h3>`;
+        let html = `
+          <div class="modal-sticky-header">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <h3 style="margin:0;">請選擇要導航的分店</h3>
+              <button onclick="App.closeModal()" style="background:none; border:none; font-size:24px; cursor:pointer; color:#999; padding:0; line-height:1;">✕</button>
+            </div>
+          </div>
+          <div class="modal-content-scroll">
+        `;
         branchList.forEach(p => {
-            html += `
-            <button class="action-btn" style="width:100%; margin-bottom:10px; background:#F9FAFB; color:#333; border:1px solid #ddd; text-align:left; padding:10px 15px;" 
-                    onclick="App.executeGoogleMapsOpenById('${p.place_id}')">
-                🔷 ${p.name}
-            </button>`;
+            html += `<button class="action-btn" style="width:100%; margin-bottom:10px; background:#F9FAFB; color:#333; border:1px solid #ddd; text-align:left; padding:10px 15px;" onclick="App.executeGoogleMapsOpenById('${p.place_id}')">🔷 ${p.name}</button>`;
         });
-        html += `<div class="modal-actions"><button onclick="App.closeModal()" style="background:#eee; color:#333; border:none; padding:10px 18px; border-radius:20px; font-weight:bold; cursor:pointer; width:100%;">取消</button></div>`;
+        html += `</div>`;
         this.openModal(html);
     }
   },
@@ -785,9 +776,7 @@ const App = {
 
   executeGoogleMapsOpen(place) {
     let url = `https://www.google.com/maps/search/?api=1&query=$${encodeURIComponent(place.name)}`;
-    if (place.place_id) {
-      url += `&query_place_id=${place.place_id}`;
-    }
+    if (place.place_id) url += `&query_place_id=${place.place_id}`;
     window.open(url, '_blank');
   },
 
@@ -804,36 +793,42 @@ const App = {
 
   addMenuNote(category) {
     const html = `
-      <h3 style="margin-top:0">新增餐點評價</h3>
-      <div style="margin-bottom: 12px; text-align: left;">
-        <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">餐點名稱</label>
-        <input type="text" id="menu-form-title" placeholder="請輸入餐點名稱" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
-      </div>
-      <div style="display:flex; gap:10px; margin-bottom: 12px; text-align: left;">
-        <div style="flex:1;">
-          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">分類</label>
-          <select id="menu-form-category" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px; background:white;">
-            <option value="好吃" ${category === '好吃' ? 'selected' : ''}>好吃</option>
-            <option value="普通" ${category === '普通' ? 'selected' : ''}>普通</option>
-            <option value="難吃" ${category === '難吃' ? 'selected' : ''}>難吃</option>
-          </select>
-        </div>
-        <div style="flex:1;">
-          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評分 (可留空)</label>
-          <input type="number" id="menu-form-rating" min="1" max="5" placeholder="1~5星" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
+      <div class="modal-sticky-header">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 style="margin:0;">新增餐點評價</h3>
+          <button onclick="App.closeModal()" style="background:none; border:none; font-size:24px; cursor:pointer; color:#999; padding:0; line-height:1;">✕</button>
         </div>
       </div>
-      <div style="margin-bottom: 12px; text-align: left;">
-        <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評價心得</label>
-        <textarea id="menu-form-content" rows="3" placeholder="請輸入心得 (可留空)" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px; resize:vertical; font-family:inherit;"></textarea>
-      </div>
-      <div style="margin-bottom: 15px; text-align: left;">
-        <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">上傳照片 (無壓縮原檔)</label>
-        <input type="file" id="menu-form-image" accept="image/*" style="width:100%; font-size:14px;">
-      </div>
-      <div class="modal-actions" style="display:flex; gap:10px;">
-        <button onclick="App.closeModal()" style="flex:1; background:#eee; color:#333; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">取消</button>
-        <button id="save-menu-btn" onclick="App.submitMenuNote()" style="flex:1; background:var(--primary); color:white; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">儲存</button>
+      <div class="modal-content-scroll">
+        <div style="margin-bottom: 12px; text-align: left;">
+          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">餐點名稱</label>
+          <input type="text" id="menu-form-title" placeholder="請輸入餐點名稱" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
+        </div>
+        <div style="display:flex; gap:10px; margin-bottom: 12px; text-align: left;">
+          <div style="flex:1;">
+            <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">分類</label>
+            <select id="menu-form-category" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px; background:white;">
+              <option value="好吃" ${category === '好吃' ? 'selected' : ''}>好吃</option>
+              <option value="普通" ${category === '普通' ? 'selected' : ''}>普通</option>
+              <option value="難吃" ${category === '難吃' ? 'selected' : ''}>難吃</option>
+            </select>
+          </div>
+          <div style="flex:1;">
+            <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評分 (可留空)</label>
+            <input type="number" id="menu-form-rating" min="1" max="5" placeholder="1~5星" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
+          </div>
+        </div>
+        <div style="margin-bottom: 12px; text-align: left;">
+          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評價心得</label>
+          <textarea id="menu-form-content" rows="3" placeholder="請輸入心得 (可留空)" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px; resize:vertical; font-family:inherit;"></textarea>
+        </div>
+        <div style="margin-bottom: 15px; text-align: left;">
+          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">上傳照片 (無壓縮原檔)</label>
+          <input type="file" id="menu-form-image" accept="image/*" style="width:100%; font-size:14px;">
+        </div>
+        <div class="modal-actions" style="display:flex; gap:10px;">
+          <button id="save-menu-btn" onclick="App.submitMenuNote()" style="flex:1; background:var(--primary); color:white; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">儲存</button>
+        </div>
       </div>
     `;
     this.openModal(html);
@@ -851,7 +846,6 @@ const App = {
     const ratingRaw = document.getElementById('menu-form-rating').value;
     const rating = ratingRaw === '' ? null : parseInt(ratingRaw);
     const content = document.getElementById('menu-form-content').value.trim();
-    
     let imageUrl = null;
     const fileInput = document.getElementById('menu-form-image');
     if (fileInput.files.length > 0) {
@@ -866,15 +860,7 @@ const App = {
     }
 
     const bName = this.getBrandName(this.currentDetailPlace.name);
-    
-    this.brandDatabase[bName].menu.push({
-      title: title,
-      content: content,
-      category: category,
-      rating: rating,
-      imageUrl: imageUrl
-    });
-    
+    this.brandDatabase[bName].menu.push({ title, content, category, rating, imageUrl });
     this.ensureInList(); 
     this.saveData();
     this.renderDetailData(bName);
@@ -894,12 +880,10 @@ const App = {
   renderTempOverallImages() {
     const container = document.getElementById('overall-edit-imgs');
     if(!container) return;
-    
     if (this.tempOverallImages.length === 0) {
       container.innerHTML = '<span style="font-size:13px; color:#999;">目前沒有照片</span>';
       return;
     }
-    
     container.innerHTML = this.tempOverallImages.map((url, i) => `
       <div style="position:relative; display:inline-block;">
         <img src="${url}" style="width:60px; height:60px; object-fit:cover; border-radius:6px; border:1px solid #ccc;">
@@ -923,73 +907,82 @@ const App = {
     else if (type === 'menu') {
       this.tempMenuImageUrl = item.imageUrl || null;
       const ratingValue = (item.rating === null || item.rating === undefined) ? '' : item.rating;
-      
       const html = `
-        <h3 style="margin-top:0">編輯餐點評價</h3>
-        <div style="margin-bottom: 12px; text-align: left;">
-          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">餐點名稱</label>
-          <input type="text" id="menu-form-title" value="${item.title || ''}" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
+        <div class="modal-sticky-header">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h3 style="margin:0;">編輯餐點評價</h3>
+            <button onclick="App.closeModal()" style="background:none; border:none; font-size:24px; cursor:pointer; color:#999; padding:0; line-height:1;">✕</button>
+          </div>
         </div>
-        <div style="display:flex; gap:10px; margin-bottom: 12px; text-align: left;">
-          <div style="flex:1;">
-            <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">分類</label>
-            <input type="hidden" id="menu-form-category" value="${item.category}">
-            <div style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #eee; border-radius:6px; font-size:15px; background:#f9f9f9; color:#666;">
-              ${item.category === '好吃' ? '好吃' : item.category === '普通' ? '普通' : '難吃'}
+        <div class="modal-content-scroll">
+          <div style="margin-bottom: 12px; text-align: left;">
+            <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">餐點名稱</label>
+            <input type="text" id="menu-form-title" value="${item.title || ''}" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
+          </div>
+          <div style="display:flex; gap:10px; margin-bottom: 12px; text-align: left;">
+            <div style="flex:1;">
+              <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">分類</label>
+              <input type="hidden" id="menu-form-category" value="${item.category}">
+              <div style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #eee; border-radius:6px; font-size:15px; background:#f9f9f9; color:#666;">
+                ${item.category === '好吃' ? '好吃' : item.category === '普通' ? '普通' : '難吃'}
+              </div>
+            </div>
+            <div style="flex:1;">
+              <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評分 (可留空)</label>
+              <input type="number" id="menu-form-rating" min="1" max="5" value="${ratingValue}" placeholder="1~5星" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
             </div>
           </div>
-          <div style="flex:1;">
-            <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評分 (可留空)</label>
-            <input type="number" id="menu-form-rating" min="1" max="5" value="${ratingValue}" placeholder="1~5星" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
+          <div style="margin-bottom: 12px; text-align: left;">
+            <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評價心得</label>
+            <textarea id="menu-form-content" rows="3" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px; resize:vertical; font-family:inherit;">${item.content || ''}</textarea>
           </div>
-        </div>
-        <div style="margin-bottom: 12px; text-align: left;">
-          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評價心得</label>
-          <textarea id="menu-form-content" rows="3" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px; resize:vertical; font-family:inherit;">${item.content || ''}</textarea>
-        </div>
-        <div style="margin-bottom: 15px; text-align: left;">
-          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">目前照片</label>
-          <div id="menu-edit-img-container" style="${this.tempMenuImageUrl ? 'display:flex;' : 'display:none;'} gap:10px; align-items:center; margin-bottom:10px;">
-             <button onclick="App.showImageModal(App.tempMenuImageUrl)" style="background:#f0f0f0; border:1px solid #ddd; padding:5px 10px; border-radius:15px; cursor:pointer; font-size:13px;">照片</button>
-             <button onclick="App.removeTempMenuImage()" style="background:#FFEbee; color:#F44336; border:1px solid #FFCDD2; padding:5px 10px; border-radius:15px; cursor:pointer; font-size:13px;">刪除</button>
+          <div style="margin-bottom: 15px; text-align: left;">
+            <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">目前照片</label>
+            <div id="menu-edit-img-container" style="${this.tempMenuImageUrl ? 'display:flex;' : 'display:none;'} gap:10px; align-items:center; margin-bottom:10px;">
+               <button onclick="App.showImageModal(App.tempMenuImageUrl)" style="background:#f0f0f0; border:1px solid #ddd; padding:5px 10px; border-radius:15px; cursor:pointer; font-size:13px;">照片</button>
+               <button onclick="App.removeTempMenuImage()" style="background:#FFEbee; color:#F44336; border:1px solid #FFCDD2; padding:5px 10px; border-radius:15px; cursor:pointer; font-size:13px;">刪除</button>
+            </div>
+            <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">上傳新照片 (會覆蓋目前照片)</label>
+            <input type="file" id="menu-form-image" accept="image/*" style="width:100%; font-size:14px;">
           </div>
-          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">上傳新照片 (會覆蓋目前照片)</label>
-          <input type="file" id="menu-form-image" accept="image/*" style="width:100%; font-size:14px;">
-        </div>
-        <div class="modal-actions" style="display:flex; gap:10px;">
-          <button onclick="App.closeModal()" style="flex:1; background:#eee; color:#333; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">取消</button>
-          <button id="save-menu-edit-btn" onclick="App.submitMenuEdit(${index})" style="flex:1; background:var(--primary); color:white; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">儲存</button>
+          <div class="modal-actions" style="display:flex; gap:10px;">
+            <button id="save-menu-edit-btn" onclick="App.submitMenuEdit(${index})" style="flex:1; background:var(--primary); color:white; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">儲存</button>
+          </div>
         </div>
       `;
       this.openModal(html);
     } 
     else if (type === 'overall') {
       this.tempOverallImages = item.imageUrls ? [...item.imageUrls] : (item.imageUrl ? [item.imageUrl] : []);
-      
       const html = `
-        <h3 style="margin-top:0">編輯總評價</h3>
-        <div style="margin-bottom: 12px; text-align: left;">
-          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評價標題</label>
-          <input type="text" id="overall-form-title" value="${item.title || ''}" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
+        <div class="modal-sticky-header">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h3 style="margin:0;">編輯總評價</h3>
+            <button onclick="App.closeModal()" style="background:none; border:none; font-size:24px; cursor:pointer; color:#999; padding:0; line-height:1;">✕</button>
+          </div>
         </div>
-        <div style="margin-bottom: 12px; text-align: left;">
-          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評價細節</label>
-          <textarea id="overall-form-content" rows="4" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px; resize:vertical; font-family:inherit;">${item.content || ''}</textarea>
-        </div>
-        <div style="margin-bottom: 15px; text-align: left;">
-          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">目前照片</label>
-          <div id="overall-edit-imgs" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px; min-height: 20px;"></div>
-          
-          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">上傳更多照片 (可多選)</label>
-          <input type="file" id="overall-form-image" accept="image/*" multiple style="width:100%; font-size:14px;">
-        </div>
-        <div class="modal-actions" style="display:flex; gap:10px;">
-          <button onclick="App.closeModal()" style="flex:1; background:#eee; color:#333; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">取消</button>
-          <button id="save-overall-edit-btn" onclick="App.submitOverallEdit(${index})" style="flex:1; background:var(--primary); color:white; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">儲存</button>
+        <div class="modal-content-scroll">
+          <div style="margin-bottom: 12px; text-align: left;">
+            <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評價標題</label>
+            <input type="text" id="overall-form-title" value="${item.title || ''}" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
+          </div>
+          <div style="margin-bottom: 12px; text-align: left;">
+            <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評價細節</label>
+            <textarea id="overall-form-content" rows="4" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px; resize:vertical; font-family:inherit;">${item.content || ''}</textarea>
+          </div>
+          <div style="margin-bottom: 15px; text-align: left;">
+            <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">目前照片</label>
+            <div id="overall-edit-imgs" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px; min-height: 20px;"></div>
+            
+            <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">上傳更多照片 (可多選)</label>
+            <input type="file" id="overall-form-image" accept="image/*" multiple style="width:100%; font-size:14px;">
+          </div>
+          <div class="modal-actions" style="display:flex; gap:10px;">
+            <button id="save-overall-edit-btn" onclick="App.submitOverallEdit(${index})" style="flex:1; background:var(--primary); color:white; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">儲存</button>
+          </div>
         </div>
       `;
       this.openModal(html);
-      
       setTimeout(() => this.renderTempOverallImages(), 50);
     }
   },
@@ -1008,7 +1001,6 @@ const App = {
     const content = document.getElementById('menu-form-content').value.trim();
 
     const bName = this.getBrandName(this.currentDetailPlace.name);
-    
     let imageUrl = this.tempMenuImageUrl; 
     
     const fileInput = document.getElementById('menu-form-image');
@@ -1023,14 +1015,7 @@ const App = {
       }
     }
 
-    this.brandDatabase[bName].menu[index] = {
-      title: title,
-      content: content,
-      rating: rating,
-      category: category,
-      imageUrl: imageUrl
-    };
-    
+    this.brandDatabase[bName].menu[index] = { title, content, rating, category, imageUrl };
     this.saveData();
     this.renderDetailData(bName);
     this.closeModal();
@@ -1038,22 +1023,28 @@ const App = {
 
   addOverallReview() {
     const html = `
-      <h3 style="margin-top:0">新增總評價</h3>
-      <div style="margin-bottom: 12px; text-align: left;">
-        <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評價標題</label>
-        <input type="text" id="overall-form-title" placeholder="例如：整體環境、服務態度" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
+      <div class="modal-sticky-header">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 style="margin:0;">新增總評價</h3>
+          <button onclick="App.closeModal()" style="background:none; border:none; font-size:24px; cursor:pointer; color:#999; padding:0; line-height:1;">✕</button>
+        </div>
       </div>
-      <div style="margin-bottom: 12px; text-align: left;">
-        <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評價細節</label>
-        <textarea id="overall-form-content" rows="4" placeholder="請輸入細節 (可留空)" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px; resize:vertical; font-family:inherit;"></textarea>
-      </div>
-      <div style="margin-bottom: 15px; text-align: left;">
-        <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">上傳照片 (支援多張)</label>
-        <input type="file" id="overall-form-image" accept="image/*" multiple style="width:100%; font-size:14px;">
-      </div>
-      <div class="modal-actions" style="display:flex; gap:10px;">
-        <button onclick="App.closeModal()" style="flex:1; background:#eee; color:#333; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">取消</button>
-        <button id="save-overall-btn" onclick="App.submitOverallNote()" style="flex:1; background:var(--primary); color:white; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">儲存</button>
+      <div class="modal-content-scroll">
+        <div style="margin-bottom: 12px; text-align: left;">
+          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評價標題</label>
+          <input type="text" id="overall-form-title" placeholder="例如：整體環境、服務態度" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px;">
+        </div>
+        <div style="margin-bottom: 12px; text-align: left;">
+          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">評價細節</label>
+          <textarea id="overall-form-content" rows="4" placeholder="請輸入細節 (可留空)" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; font-size:15px; resize:vertical; font-family:inherit;"></textarea>
+        </div>
+        <div style="margin-bottom: 15px; text-align: left;">
+          <label style="display:block; margin-bottom:5px; font-size:14px; font-weight:bold; color:#555;">上傳照片 (支援多張)</label>
+          <input type="file" id="overall-form-image" accept="image/*" multiple style="width:100%; font-size:14px;">
+        </div>
+        <div class="modal-actions" style="display:flex; gap:10px;">
+          <button id="save-overall-btn" onclick="App.submitOverallNote()" style="flex:1; background:var(--primary); color:white; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">儲存</button>
+        </div>
       </div>
     `;
     this.openModal(html);
@@ -1068,7 +1059,6 @@ const App = {
     btn.innerText = '上傳多圖與儲存中...';
 
     const content = document.getElementById('overall-form-content').value.trim();
-    
     let imageUrls = [];
     const fileInput = document.getElementById('overall-form-image');
     
@@ -1087,17 +1077,9 @@ const App = {
     }
 
     const bName = this.getBrandName(this.currentDetailPlace.name);
+    if (!this.brandDatabase[bName].overall) this.brandDatabase[bName].overall = [];
     
-    if (!this.brandDatabase[bName].overall) {
-      this.brandDatabase[bName].overall = [];
-    }
-    
-    this.brandDatabase[bName].overall.unshift({
-      title: title,
-      content: content,
-      imageUrls: imageUrls
-    });
-    
+    this.brandDatabase[bName].overall.unshift({ title, content, imageUrls });
     this.ensureInList();
     this.saveData();
     this.renderDetailData(bName);
@@ -1114,7 +1096,6 @@ const App = {
 
     const content = document.getElementById('overall-form-content').value.trim();
     const bName = this.getBrandName(this.currentDetailPlace.name);
-    
     let imageUrls = [...this.tempOverallImages]; 
 
     const fileInput = document.getElementById('overall-form-image');
@@ -1132,12 +1113,7 @@ const App = {
       }
     }
     
-    this.brandDatabase[bName].overall[index] = {
-      title: title,
-      content: content,
-      imageUrls: imageUrls
-    };
-    
+    this.brandDatabase[bName].overall[index] = { title, content, imageUrls };
     this.saveData();
     this.renderDetailData(bName);
     this.closeModal();
@@ -1155,11 +1131,15 @@ const App = {
   showAddToListModal() {
     const bName = this.getBrandName(this.currentDetailPlace.name);
     
-    const listContainer = document.getElementById('modal-list-container');
-    const currentScroll = listContainer ? listContainer.scrollTop : 0;
-    
-    let html = `<h3 style="margin-top:0">加入清單</h3>`;
-    html += `<div id="modal-list-container" style="max-height: 50vh; overflow-y: auto; margin-bottom: 15px; padding-right: 5px;">`;
+    let html = `
+      <div class="modal-sticky-header">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 style="margin:0;">加入清單</h3>
+          <button onclick="App.closeModal()" style="background:none; border:none; font-size:24px; cursor:pointer; color:#999; padding:0; line-height:1;">✕</button>
+        </div>
+      </div>
+      <div class="modal-content-scroll" id="modal-list-container">
+    `;
     
     Object.keys(this.userLists).forEach(listName => {
       const isAlreadyIn = this.userLists[listName].some(p => this.getBrandName(p.name) === bName);
@@ -1173,19 +1153,13 @@ const App = {
         </label>`;
     });
     
-    html += `</div>`;
     html += `
-      <div class="modal-actions" style="display:flex; gap:10px;">
-        <button onclick="App.createNewListFromModal()" style="flex:1; background:#4CAF50; color:white; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">+ 新增清單</button>
-        <button class="btn-primary" onclick="App.closeModal()" style="flex:1;">完成</button>
+        <div class="modal-actions" style="display:flex; gap:10px; margin-top:20px;">
+          <button onclick="App.createNewListFromModal()" style="flex:1; background:#4CAF50; color:white; border:none; padding:12px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:15px;">+ 新增清單</button>
+        </div>
       </div>
     `;
     this.openModal(html);
-    
-    const newListContainer = document.getElementById('modal-list-container');
-    if (newListContainer) {
-        newListContainer.scrollTop = currentScroll;
-    }
   },
   
   createNewListFromModal() {
@@ -1193,6 +1167,7 @@ const App = {
     if (name && !this.userLists[name]) {
       this.userLists[name] = [];
       this.listEmojis[name] = '🔖';
+      this.listOrder.unshift(name); 
       this.expandedLists.add(name); 
       this.saveData();
       this.showAddToListModal();
@@ -1211,9 +1186,7 @@ const App = {
         }
       } else {
         for (const ln in this.userLists) {
-          if (ln !== '未分類') {
-            this.userLists[ln] = this.userLists[ln].filter(p => this.getBrandName(p.name) !== bName);
-          }
+          if (ln !== '未分類') this.userLists[ln] = this.userLists[ln].filter(p => this.getBrandName(p.name) !== bName);
         }
       }
 
@@ -1239,10 +1212,7 @@ const App = {
     this.updateVisibleRestaurants();
     this.updateDetailListBadges(); 
     
-    if (document.getElementById('view-lists').classList.contains('active')) {
-      this.renderLists();
-    }
-
+    if (document.getElementById('view-lists').classList.contains('active')) this.renderLists();
     this.showAddToListModal();
   },
 
@@ -1256,11 +1226,13 @@ const App = {
     this.userLists[newName] = this.userLists[oldName];
     this.listEmojis[newName] = this.listEmojis[oldName];
 
+    const idx = this.listOrder.indexOf(oldName);
+    if (idx !== -1) this.listOrder[idx] = newName;
+
     if (this.activeListFilters.has(oldName)) {
       this.activeListFilters.delete(oldName);
       this.activeListFilters.add(newName);
     }
-    
     if (this.expandedLists.has(oldName)) {
         this.expandedLists.delete(oldName);
         this.expandedLists.add(newName);
@@ -1282,20 +1254,40 @@ const App = {
     const newEmoji = prompt(`請輸入新的清單圖示 (請使用表情符號 Emoji)：`, currentEmoji);
     
     if (!newEmoji || newEmoji.trim() === "" || newEmoji === currentEmoji) return;
-
     this.listEmojis[listName] = newEmoji.trim();
-
     this.saveData();
     this.renderLists(); 
     this.rebuildMarkers(); 
     this.updateDetailListBadges(); 
   },
 
+  // 🌟 開啟/關閉「清單排序拖曳模式」
+  toggleListSortMode() {
+    this.isSortingLists = !this.isSortingLists;
+    const btn = document.getElementById('sort-lists-btn');
+    const fab = document.getElementById('add-list-fab');
+    if (this.isSortingLists) {
+      btn.innerText = '完成';
+      btn.style.background = 'var(--primary)';
+      btn.style.color = 'white';
+      if (fab) fab.style.display = 'none'; 
+    } else {
+      btn.innerText = '排序';
+      btn.style.background = 'transparent';
+      btn.style.color = 'var(--primary)';
+      if (fab) fab.style.display = 'flex'; 
+    }
+    this.renderLists();
+  },
+
+  // ==========================================
+  // 渲染清單，支援【按鈕點擊後的排序模式】
+  // ==========================================
   renderLists() {
     const container = document.getElementById('my-lists-container');
     container.innerHTML = ''; 
     
-    if (Object.keys(this.userLists).length === 0) {
+    if (this.listOrder.length === 0) {
       container.innerHTML = '<p style="padding:20px;text-align:center;color:gray;">還沒有任何清單，點擊下方按鈕建立吧！</p>';
       return;
     }
@@ -1303,7 +1295,76 @@ const App = {
     const searchInput = document.getElementById('list-search-input');
     const keyword = searchInput ? searchInput.value.trim().toLowerCase() : '';
     
-    Object.entries(this.userLists).forEach(([name, restaurants]) => {
+    // 🌟 定義 100% 絕對能拖曳的邏輯
+    let draggedSection = null;
+
+    const onDragStart = (e) => {
+        if (!App.isSortingLists) return;
+        
+        // 電腦版避免選取文字
+        if (e.type !== 'touchstart' && e.cancelable) e.preventDefault(); 
+        
+        draggedSection = e.target.closest('.section');
+        if (!draggedSection) return;
+        
+        draggedSection.classList.add('dragging');
+        
+        // 同時綁定 Mouse 與 Touch 確保全平台可用
+        document.addEventListener('mousemove', onDragMove, {passive: false});
+        document.addEventListener('mouseup', onDragEnd);
+        document.addEventListener('touchmove', onDragMove, {passive: false});
+        document.addEventListener('touchend', onDragEnd);
+    };
+
+    const onDragMove = (e) => {
+        if (!draggedSection) return;
+        
+        // 防止手機畫面一起滑動
+        if (e.cancelable) e.preventDefault(); 
+        
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        
+        // 暫時隱藏以獲取底部元素
+        draggedSection.style.display = 'none';
+        const elementBelow = document.elementFromPoint(clientX, clientY);
+        draggedSection.style.display = '';
+        
+        if (!elementBelow) return;
+        const targetSection = elementBelow.closest('.section');
+        
+        if (targetSection && targetSection !== draggedSection) {
+            const rect = targetSection.getBoundingClientRect();
+            if (clientY > rect.top + rect.height / 2) {
+                targetSection.parentNode.insertBefore(draggedSection, targetSection.nextSibling);
+            } else {
+                targetSection.parentNode.insertBefore(draggedSection, targetSection);
+            }
+        }
+    };
+
+    const onDragEnd = (e) => {
+        if (!draggedSection) return;
+        draggedSection.classList.remove('dragging');
+        
+        const newOrder = [];
+        document.querySelectorAll('#my-lists-container .section').forEach(sec => {
+            if(sec.dataset.listName) newOrder.push(sec.dataset.listName);
+        });
+        App.listOrder = newOrder;
+        App.saveData(); // 🌟 確保立刻寫入 localStorage/GAS
+        
+        draggedSection = null;
+        document.removeEventListener('mousemove', onDragMove);
+        document.removeEventListener('mouseup', onDragEnd);
+        document.removeEventListener('touchmove', onDragMove);
+        document.removeEventListener('touchend', onDragEnd);
+    };
+
+    this.listOrder.forEach((name) => {
+      const restaurants = this.userLists[name];
+      if (!restaurants) return;
+
       const uniqueRestaurants = [];
       const seenBrands = new Set();
       restaurants.forEach(r => {
@@ -1324,23 +1385,23 @@ const App = {
               filteredRestaurants = uniqueRestaurants.filter(r => this.getBrandName(r.name).toLowerCase().includes(keyword));
           }
       }
-      
-      if (keyword !== '' && !isListMatch && filteredRestaurants.length === 0) {
-          return;
-      }
+      if (keyword !== '' && !isListMatch && filteredRestaurants.length === 0) return;
       
       const section = document.createElement('div');
       section.className = 'section';
       section.style.margin = '15px';
+      section.dataset.listName = name; 
       
-      let isExpanded = this.expandedLists.has(name) || keyword !== '';
+      // 如果正在排序模式，強制收合所有列表以利拖曳
+      let isExpanded = !this.isSortingLists && (this.expandedLists.has(name) || keyword !== '');
       
       const h3 = document.createElement('h3');
       h3.style.display = 'flex';
       h3.style.justifyContent = 'space-between';
       h3.style.alignItems = 'center';
       h3.style.margin = '0 0 10px 0';
-      h3.style.cursor = 'pointer'; 
+      h3.style.cursor = this.isSortingLists ? 'grab' : 'pointer'; 
+      h3.style.userSelect = 'none'; 
       
       const emoji = this.listEmojis[name] || '🔖';
       const titleSpan = document.createElement('span');
@@ -1351,47 +1412,53 @@ const App = {
       actionDiv.style.gap = '10px';
       actionDiv.style.alignItems = 'center';
 
-      if (name !== '未分類') {
-        const editEmojiBtn = document.createElement('button');
-        editEmojiBtn.innerText = '修圖';
-        editEmojiBtn.style.cssText = 'background:none; color:#007AFF; border:none; cursor:pointer; font-weight:bold; font-size:14px; padding:0;';
-        editEmojiBtn.onclick = (e) => { e.stopPropagation(); this.changeListEmoji(name); }; 
-        actionDiv.appendChild(editEmojiBtn);
+      if (this.isSortingLists) {
+          const dragIcon = document.createElement('div');
+          dragIcon.innerHTML = '☰';
+          dragIcon.style.cssText = 'color:#aaa; font-size:22px; padding-left:15px; pointer-events:none;';
+          actionDiv.appendChild(dragIcon);
+          
+          h3.style.touchAction = 'none'; // 🌟 防止手機滾動干擾
+          h3.addEventListener('touchstart', onDragStart, {passive: false});
+          h3.addEventListener('mousedown', onDragStart, {passive: false});
+      } else {
+          if (name !== '未分類') {
+            const editEmojiBtn = document.createElement('button');
+            editEmojiBtn.innerText = '修圖';
+            editEmojiBtn.style.cssText = 'background:none; color:#007AFF; border:none; cursor:pointer; font-weight:bold; font-size:14px; padding:0;';
+            editEmojiBtn.onclick = (e) => { e.stopPropagation(); this.changeListEmoji(name); }; 
+            actionDiv.appendChild(editEmojiBtn);
 
-        const renameBtn = document.createElement('button');
-        renameBtn.innerText = '編輯';
-        renameBtn.style.cssText = 'background:none; color:#007AFF; border:none; cursor:pointer; font-weight:bold; font-size:14px; padding:0;';
-        renameBtn.onclick = (e) => { e.stopPropagation(); this.renameList(name); };
-        actionDiv.appendChild(renameBtn);
+            const renameBtn = document.createElement('button');
+            renameBtn.innerText = '編輯';
+            renameBtn.style.cssText = 'background:none; color:#007AFF; border:none; cursor:pointer; font-weight:bold; font-size:14px; padding:0;';
+            renameBtn.onclick = (e) => { e.stopPropagation(); this.renameList(name); };
+            actionDiv.appendChild(renameBtn);
+          }
+
+          const deleteListBtn = document.createElement('button');
+          deleteListBtn.innerText = '刪除';
+          deleteListBtn.style.cssText = 'background:none; color:#FF4D4F; border:none; cursor:pointer; font-weight:bold; font-size:14px; padding:0;';
+          deleteListBtn.onclick = (e) => { e.stopPropagation(); this.deleteList(name); };
+          actionDiv.appendChild(deleteListBtn);
+
+          h3.onclick = (e) => {
+              if(e.target.tagName.toLowerCase() === 'button') return;
+              isExpanded = !isExpanded;
+              if (isExpanded) this.expandedLists.add(name);
+              else this.expandedLists.delete(name);
+              ul.style.display = isExpanded ? 'block' : 'none';
+              titleSpan.innerHTML = `<span style="display:inline-block; width:15px; font-size:12px; color:#888;">${isExpanded ? '▼' : '▶'}</span> ${emoji} ${name} (${filteredRestaurants.length})`;
+          };
       }
-
-      const deleteListBtn = document.createElement('button');
-      deleteListBtn.innerText = '刪除';
-      deleteListBtn.style.cssText = 'background:none; color:#FF4D4F; border:none; cursor:pointer; font-weight:bold; font-size:14px; padding:0;';
-      deleteListBtn.onclick = (e) => { e.stopPropagation(); this.deleteList(name); };
       
-      actionDiv.appendChild(deleteListBtn);
       h3.appendChild(titleSpan);
       h3.appendChild(actionDiv);
       section.appendChild(h3);
 
       const ul = document.createElement('ul');
-      ul.style.paddingLeft = '10px';
+      ul.style.paddingLeft = '5px';
       ul.style.display = isExpanded ? 'block' : 'none'; 
-      
-      h3.onclick = (e) => {
-          if(e.target.tagName.toLowerCase() === 'button') return;
-          
-          isExpanded = !isExpanded;
-          if (isExpanded) {
-              this.expandedLists.add(name);
-          } else {
-              this.expandedLists.delete(name);
-          }
-          
-          ul.style.display = isExpanded ? 'block' : 'none';
-          titleSpan.innerHTML = `<span style="display:inline-block; width:15px; font-size:12px; color:#888;">${isExpanded ? '▼' : '▶'}</span> ${emoji} ${name} (${filteredRestaurants.length})`;
-      };
       
       if (filteredRestaurants.length > 0) {
         filteredRestaurants.forEach(r => {
@@ -1413,7 +1480,7 @@ const App = {
           }
           
           nameSpan.innerHTML = `🔷${displayName}`; 
-          nameSpan.style.cssText = 'color:var(--primary); font-weight:bold; font-size:16px; cursor:pointer; text-decoration:underline; flex:1;';
+          nameSpan.style.cssText = 'color:var(--primary); font-weight:bold; font-size:16px; cursor:pointer; text-decoration:underline; flex:1; margin-left: 5px;';
           nameSpan.onclick = () => {
             if (this.map && r.geometry && r.geometry.location) {
               this.map.setCenter(r.geometry.location);
@@ -1470,6 +1537,7 @@ const App = {
     if (name && !this.userLists[name]) {
       this.userLists[name] = [];
       this.listEmojis[name] = '🔖';
+      this.listOrder.unshift(name); 
       this.expandedLists.add(name); 
       this.saveData();
       this.renderLists();
@@ -1482,6 +1550,7 @@ const App = {
       
       delete this.userLists[name];
       delete this.listEmojis[name];
+      this.listOrder = this.listOrder.filter(k => k !== name); // 從排序中移除
       this.activeListFilters.delete(name);
       this.expandedLists.delete(name); 
       
@@ -1531,6 +1600,10 @@ const App = {
     document.querySelectorAll('.view-container').forEach(el => el.classList.remove('active'));
     document.getElementById('view-' + viewId).classList.add('active');
     
+    if(viewId !== 'lists' && this.isSortingLists) {
+      this.toggleListSortMode();
+    }
+
     if(viewId === 'home' && this.map) {
        google.maps.event.trigger(this.map, 'resize');
        this.map.setCenter(this.mapCenter);

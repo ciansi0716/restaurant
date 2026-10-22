@@ -38,7 +38,7 @@ header {
   justify-content: space-between; 
   align-items: center; 
   box-shadow: var(--shadow-sm);
-  z-index: 20;
+  z-index: 2000;
   position: relative;
 }
 
@@ -99,7 +99,7 @@ header {
   position: relative; 
   display: flex; 
   gap: 10px; 
-  z-index: 10;
+  z-index: 1001;
   box-shadow: 0 4px 10px rgba(0,0,0,0.05); 
 }
 
@@ -170,18 +170,6 @@ header {
   padding: 10px; 
   border-radius: 50%; 
   color: var(--text-main);
-}
-
-#list-container { 
-  flex: 1; 
-  background: var(--surface); 
-  display: flex; 
-  flex-direction: column; 
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  margin-top: -20px; 
-  z-index: 10;
-  box-shadow: 0 -4px 24px rgba(0,0,0,0.06);
-  padding-top: 5px;
 }
 
 .highlight-text { 
@@ -340,6 +328,17 @@ header {
   padding: 20px; 
   border-radius: var(--radius-md); 
   box-shadow: var(--shadow-sm); 
+  transition: all 0.2s ease;
+}
+
+/* 🌟 清單拖曳時的外觀 - 加入浮起與陰影 */
+.section.dragging {
+  opacity: 0.85;
+  background: #FFF9F5;
+  box-shadow: 0 16px 32px rgba(0,0,0,0.2);
+  border: 2px dashed var(--primary);
+  position: relative;
+  z-index: 999;
 }
 
 .section h3 { 
@@ -438,32 +437,48 @@ header {
 }
 
 /* =========================================
-   7. 彈跳視窗 (Modal)
+   7. 彈跳視窗 (Modal) - 🌟 層級最高、永遠不被擋住
 ========================================= */
 .modal-overlay { 
   position: fixed; 
-  top: 0; 
-  left: 0; 
-  width: 100%; 
-  height: 100%; 
+  top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(18, 20, 32, 0.6); 
   backdrop-filter: blur(4px); 
   display: flex; 
-  justify-content: center; 
-  align-items: center; 
-  z-index: 1000; 
+  padding: 20px; 
+  box-sizing: border-box;
+  overflow-y: auto; 
+  z-index: 3000; /* 確保在所有東西之上 */
 }
 
 .modal-box { 
   background: var(--surface); 
-  padding: 24px; 
   border-radius: var(--radius-lg); 
-  width: 90%; 
+  width: 100%; 
   max-width: 400px; 
-  max-height: 80vh; 
-  overflow-y: auto; 
+  margin: auto; 
   box-shadow: var(--shadow-lg);
+  max-height: calc(100vh - 60px); 
+  display: flex;
+  flex-direction: column;
   animation: modalPop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.modal-content-scroll {
+  padding: 0 24px 24px 24px;
+  overflow-y: auto;
+}
+
+/* Sticky Header 讓標題與叉叉永遠固定可見 */
+.modal-sticky-header {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 10;
+  padding: 24px 24px 10px 24px;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  border-bottom: 1px solid #f0f0f0;
+  margin-bottom: 15px;
 }
 
 @keyframes modalPop {
@@ -477,7 +492,7 @@ header {
 }
 
 .modal-actions { 
-  margin-top: 24px; 
+  margin-top: 10px; 
   display: flex; 
   justify-content: flex-end; 
   gap: 12px; 

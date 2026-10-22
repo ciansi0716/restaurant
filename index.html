@@ -21,6 +21,7 @@
       position: relative;
       height: 100%;
       width: 100%;
+      overflow: hidden;
     }
     #map-container {
       height: 100% !important;
@@ -33,24 +34,24 @@
       bottom: 0;
       left: 0;
       width: 100%;
-      height: 50dvh !important; 
+      height: 50%; /* 預設半高 */
       background: var(--surface, #ffffff);
       border-radius: 24px 24px 0 0;
       box-shadow: 0 -4px 20px rgba(0,0,0,0.15);
-      transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+      transition: height 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
       z-index: 1000;
       display: flex;
       flex-direction: column;
     }
     #list-container.collapsed {
-      transform: translateY(calc(100% - 60px)); 
+      height: 60px !important;
     }
     .sheet-handle {
       width: 100%;
       height: 25px;
       display: flex;
       justify-content: center;
-      align-items: center;
+      align-items: flex-end;
       cursor: pointer;
       border: none !important;
       background: transparent !important;
@@ -97,11 +98,12 @@
       </div>
 
       <div id="list-container" class="collapsed">
-        <div class="sheet-handle" onclick="App.toggleBottomSheet()">
+        <!-- 🌟 點擊控制：循環切換 (中間->滿版->中間->縮到底) -->
+        <div class="sheet-handle" onclick="App.handleSheetClick(event)">
           <div style="width: 40px; height: 5px; background-color: #ccc; border-radius: 3px;"></div>
         </div>
         
-        <div class="list-header" style="flex-shrink: 0; cursor:pointer; padding: 15px 20px; display:flex; justify-content:space-between; align-items:center; font-weight:bold; font-size:15px; border-bottom:1px solid #f0f0f0;" onclick="App.toggleBottomSheet()">
+        <div class="list-header" style="flex-shrink: 0; cursor:pointer; padding: 10px 20px 15px 20px; display:flex; justify-content:space-between; align-items:center; font-weight:bold; font-size:15px; border-bottom:1px solid #f0f0f0;" onclick="App.handleSheetClick(event)">
           <span id="result-count" style="color: #FF7A00;">搜尋中...</span>
           <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:bold; color: #FF7A00;" onclick="event.stopPropagation();">
             僅顯示營業中 <input type="checkbox" id="open-now-toggle" onchange="App.updateVisibleRestaurants()" class="toggle-switch">
@@ -162,11 +164,13 @@
   </div>
 
   <div id="view-lists" class="view-container">
-    <div class="page-header">
+    <!-- 🌟 左上角的【排序】按鈕 -->
+    <div class="page-header" style="display: flex; align-items: center; gap: 10px;">
       <button onclick="App.navigate('home')">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
       </button>
-      <h2>我的美食清單</h2>
+      <button onclick="App.toggleListSortMode()" id="sort-lists-btn" style="width: auto; padding: 4px 12px; border-radius: 16px; border: 1px solid var(--primary); color: var(--primary); background: transparent; font-size: 14px; font-weight: bold;">排序</button>
+      <h2 style="flex: 1; margin: 0; font-size: 18px;">我的美食清單</h2>
     </div>
     
     <div style="padding: 10px 15px; background: white; border-bottom: 1px solid #eee; position: sticky; top: 0; z-index: 10;">
@@ -176,7 +180,7 @@
     <div class="scrollable-content" id="my-lists-container" style="padding-bottom: 80px;">
       </div>
 
-    <button class="fab" onclick="App.showCreateListModal()">
+    <button class="fab" onclick="App.showCreateListModal()" id="add-list-fab">
       新增清單
     </button>
   </div>
